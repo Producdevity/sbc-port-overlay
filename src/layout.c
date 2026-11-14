@@ -17,7 +17,6 @@ static const uint8_t palette[SPO_TONE_COUNT][3] = {
 static const uint8_t panel_color[3] = {15, 19, 23}, highlight[3] = {40, 88, 108},
                      black[3] = {0, 0, 0}, rule[3] = {70, 80, 90};
 static const spo_font_info *face;
-static const char *const size_names[] = {"6x12", "8x16", "12x24", "16x32"};
 
 const char *spo_item_name(uint32_t i) {
     static const char *names[] = {"FPS",
@@ -294,12 +293,13 @@ static void formatted(uint64_t now) {
         }
     if (spo->overlay.items & SPO_BIT(SPO_SELF_COST)) {
         r = new_row("OVERLAY");
+        r->span = 2;
         if (spo->sampling_stats.sample_frames)
-            put(r, 0, SPO_TONE_DIM, 5, "%.0f us", spo->sampling_stats.total_cpu_us_per_frame);
+            put(r, 0, SPO_TONE_DIM, 7, "%.0f us", spo->sampling_stats.total_cpu_us_per_frame);
         else if (spo->stats.sample_frames)
-            put(r, 0, SPO_TONE_DIM, 5, "%.0f us", spo->stats.cpu_us_mean);
+            put(r, 0, SPO_TONE_DIM, 7, "%.0f us", spo->stats.cpu_us_mean);
         else
-            put(r, 0, SPO_TONE_DIM, 5, "-- us");
+            put(r, 0, SPO_TONE_DIM, 7, "-- us");
     }
     if (!spo->formatted_at || previous_count != spo->row_count ||
         previous_header != spo->header_rows ||
@@ -407,107 +407,6 @@ static int draw_row(const plan *p, const spo_row *r, int x, int y, uint8_t alpha
 static const uint8_t *bar_color(uint64_t ns) {
     return palette[ns ? tone_rate(1e9 / (double)ns) : SPO_TONE_GOOD];
 }
-static int available(int item) {
-    return spo_metrics_available(item);
-}
-static void menu_row(int row, char *label, char *value, int *tone) {
-    static const char *presets[] = {"0: Off", "1: FPS", "2: Timing", "3: Graph", "4: Full"};
-    static const char *anchors[] = {"Top left",    "Top center",    "Top right",
-                                    "Center left", "Center",        "Center right",
-                                    "Bottom left", "Bottom center", "Bottom right"};
-    static const int frames[] = {SPO_FPS, SPO_FRAME_TIME, SPO_GRAPH, SPO_LOW_1};
-    static const int system[] = {SPO_SYSTEM_CPU, SPO_PROCESS_CPU, SPO_GPU_LOAD,
-                                 SPO_CPU_CLOCK,  SPO_GPU_CLOCK,   SPO_TEMPERATURE,
-                                 SPO_BATTERY,    SPO_CHARGING,    SPO_RSS,
-                                 SPO_MEM_AVAILABLE};
-    label[0] = value[0] = 0;
-    *tone = SPO_TONE_ACCENT;
-    if (spo->detail == 1) {
-        const char *names[5] = {"Frames", "System", NULL, NULL, "Overlay cost"};
-        int n = 2;
-        if (spo->counter_count)
-            names[n++] = "Port counters";
-        if (spo->indicator_count)
-            names[n++] = "Port indicators";
-        names[n++] = "Overlay cost";
-        snprintf(label, 64, "%s", names[row]);
-        if (row == n - 1) {
-            int on = !!(spo->overlay.items & SPO_BIT(SPO_SELF_COST));
-            snprintf(value, 64, "%s", on ? "ON" : "OFF");
-            *tone = on ? SPO_TONE_GOOD : SPO_TONE_DIM;
-        } else {
-            snprintf(value, 64, ">");
-            *tone = SPO_TONE_LABEL;
-        }
-    } else if (spo->detail == 2 || spo->detail == 3) {
-        int item = spo->detail == 2 ? frames[row] : system[row];
-        int on = !!(spo->overlay.items & SPO_BIT(item));
-        snprintf(label, 64, "%s", spo_item_name((uint32_t)item));
-        if (spo->detail == 3 && !available(item)) {
-            snprintf(value, 64, "Unavailable");
-            *tone = SPO_TONE_DIM;
-        } else {
-            snprintf(value, 64, "%s", on ? "ON" : "OFF");
-            *tone = on ? SPO_TONE_GOOD : SPO_TONE_DIM;
-        }
-    } else if (spo->detail == 4 || spo->detail == 5) {
-        int on = spo->detail == 4 ? !!(spo->counter_mask & SPO_BIT(row))
-                                  : !!(spo->indicator_mask & SPO_BIT(row));
-        snprintf(label, 64, "%s",
-                 spo->detail == 4 ? spo->counters[row].label : spo->indicators[row].label);
-        snprintf(value, 64, "%s", on ? "ON" : "OFF");
-        *tone = on ? SPO_TONE_GOOD : SPO_TONE_DIM;
-    } else if (!spo->root) {
-        static const char *names[] = {
-            "Preset",       "Items",       "Position", "Size", "Background opacity",
-            "Text opacity", "Graph length"};
-        snprintf(label, 64, "%s", names[row]);
-        if (row == 0)
-            snprintf(value, 64, "%s%s", spo->overlay.custom ? "Custom from " : "",
-                     presets[spo->overlay.preset]);
-        else if (row == 1) {
-            snprintf(value, 64, ">");
-            *tone = SPO_TONE_LABEL;
-        } else if (row == 2)
-            snprintf(value, 64, "%s", anchors[spo->overlay.anchor]);
-        else if (row == 3) {
-            if (spo->actual_scale && spo->actual_scale < spo->overlay.font_scale)
-                snprintf(value, 64, "%s, fits %s", size_names[spo->overlay.font_scale - 1],
-                         size_names[spo->actual_scale - 1]);
-            else
-                snprintf(value, 64, "%s", size_names[spo->overlay.font_scale - 1]);
-        } else if (row == 4)
-            snprintf(value, 64, "%u%%", spo->overlay.background_opacity);
-        else if (row == 5)
-            snprintf(value, 64, "%u%%", spo->overlay.text_opacity);
-        else if (row == 6)
-            snprintf(value, 64, "%u frames", spo->overlay.graph_samples);
-        if (spo->editing && row >= 3) {
-            size_t used = strlen(value);
-            snprintf(value + used, 64 - used, " (edit)");
-            *tone = SPO_TONE_WARN;
-        }
-    } else {
-        spo_option *o = spo_menu_option(row);
-        if (!o)
-            return;
-        snprintf(label, 64, "%s", o->label);
-        if (o->desc.type == SPO_TOGGLE) {
-            snprintf(value, 64, "%s", o->value ? "ON" : "OFF");
-            *tone = o->value ? SPO_TONE_GOOD : SPO_TONE_DIM;
-        } else if (o->desc.type == SPO_CHOICE)
-            snprintf(value, 64, "%s", o->choices[o->value]);
-        else if (o->desc.type == SPO_ACTION) {
-            snprintf(value, 64, "Run");
-            *tone = SPO_TONE_LABEL;
-        } else {
-            snprintf(value, 64, "%d%s", o->value, spo->editing ? " (edit)" : "");
-            if (spo->editing)
-                *tone = SPO_TONE_WARN;
-        }
-    }
-}
-
 typedef struct {
     int size, cw, ch, padx, pady, bar, rowh, cols, w, h;
 } menu_plan;
@@ -524,7 +423,7 @@ static int menu_fit(menu_plan *m, int size, uint32_t width, uint32_t height) {
     if (m->cols > 72)
         m->cols = 72;
     m->w = m->cols * f->cw + 2 * m->padx;
-    m->h = m->pady + m->bar + 10 + 10 * m->rowh + 6 + 2 * f->ch + 6 + f->ch + m->pady;
+    m->h = m->pady + m->bar + 10 + SPO_MENU_ROWS * m->rowh + 6 + 2 * f->ch + 6 + f->ch + m->pady;
     return m->cols >= 40 && m->h <= (int)height - 16;
 }
 static int wrapped(const menu_plan *m, int x, int y, const char *value, const uint8_t rgb[3],
@@ -545,12 +444,99 @@ static int wrapped(const menu_plan *m, int x, int y, const char *value, const ui
     } while (offset < length);
     return 1;
 }
+/* Tabs that fit between the shoulder keys; the active tab stays visible. */
+static int tab_bar(const menu_plan *m, int x, int y) {
+    int count = spo_menu_tabs(), first = spo->tab, last = spo->tab, used, i, left, right;
+    int gap = m->cw * 2, room = m->w - 2 * m->padx - 2 * (2 * m->cw) - 2 * m->cw;
+    used = (int)strlen(spo_menu_tab_label(spo->tab)) * m->cw;
+    for (;;) {
+        int grew = 0;
+        if (first > 0) {
+            int need = gap + (int)strlen(spo_menu_tab_label(first - 1)) * m->cw;
+            if (used + need <= room) {
+                first--;
+                used += need;
+                grew = 1;
+            }
+        }
+        if (last < count - 1) {
+            int need = gap + (int)strlen(spo_menu_tab_label(last + 1)) * m->cw;
+            if (used + need <= room) {
+                last++;
+                used += need;
+                grew = 1;
+            }
+        }
+        if (!grew)
+            break;
+    }
+    left = x + m->padx;
+    right = x + m->w - m->padx;
+    if (!text(left, y + 3, "L1", palette[SPO_TONE_LABEL], 255) ||
+        !text(right - 2 * m->cw, y + 3, "R1", palette[SPO_TONE_LABEL], 255))
+        return 0;
+    left = x + (m->w - used) / 2;
+    for (i = first; i <= last; i++) {
+        const char *label = spo_menu_tab_label(i);
+        int width = (int)strlen(label) * m->cw;
+        if (i == spo->tab &&
+            !rectangle(left - m->cw, y - 1, width + 2 * m->cw, m->bar - 2, highlight, 255))
+            return 0;
+        if (!text(left, y + 3, label, palette[i == spo->tab ? SPO_TONE_VALUE : SPO_TONE_LABEL], 255))
+            return 0;
+        left += width + gap;
+    }
+    return 1;
+}
+static int menu_rows(const menu_plan *m, int x, int y) {
+    int rows = spo_menu_rows(), i;
+    for (i = spo->scroll; i < rows && i < spo->scroll + SPO_MENU_ROWS; i++) {
+        spo_menu_row r;
+        int ry = y + (i - spo->scroll) * m->rowh;
+        spo_menu_describe(i, &r);
+        if (r.kind == SPO_ROW_HEADING) {
+            if (!text(x + m->padx, ry + 2, r.label, palette[SPO_TONE_DIM], 255))
+                return 0;
+            continue;
+        }
+        if (i == spo->cursor && !rectangle(x + 4, ry, m->w - 8, m->rowh, highlight, 255))
+            return 0;
+        if (!text(x + m->padx + (spo->tab == 1 ? m->cw * 2 : 0), ry + 2, r.label,
+                  palette[r.enabled ? SPO_TONE_VALUE : SPO_TONE_DIM], 255) ||
+            !text_right(x + m->w - m->padx, ry + 2, r.value, palette[r.tone], 255))
+            return 0;
+    }
+    if (rows > SPO_MENU_ROWS) {
+        int track = SPO_MENU_ROWS * m->rowh, thumb = track * SPO_MENU_ROWS / rows,
+            at = (track - thumb) * spo->scroll / (rows - SPO_MENU_ROWS);
+        if (thumb < 6)
+            thumb = 6;
+        if (!rectangle(x + m->w - 7, y, 3, track, rule, 255) ||
+            !rectangle(x + m->w - 7, y + at, 3, thumb, palette[SPO_TONE_LABEL], 255))
+            return 0;
+    }
+    return 1;
+}
+static const char *menu_error(void) {
+    return spo->error == SPO_OK         ? NULL
+           : spo->error == SPO_REJECTED ? "Setting rejected"
+           : spo->error == SPO_IO       ? "Could not save settings"
+                                        : "Settings error";
+}
+static int menu_footer(const menu_plan *m, int x, int y) {
+    int kind = spo_menu_row_kind(spo->cursor), at = x + m->padx;
+    char hint[96];
+    snprintf(hint, sizeof(hint), "Up/Down Move  %s  East Back  Menu Close",
+             kind == SPO_ROW_TOGGLE   ? "South Toggle"
+             : kind == SPO_ROW_ACTION ? "South Run"
+             : kind == SPO_ROW_NONE   ? "L1/R1 Tabs"
+                                      : "Left/Right Change");
+    return text(at, y, hint, palette[SPO_TONE_DIM], 255);
+}
 static spo_result menu(uint32_t width, uint32_t height) {
-    int size = height >= 720 ? 3 : 2, x, y, i, rows = spo_menu_rows();
-    int pages = (int)spo->page_count + 2, status_tone;
-    char title[64], label[64], value[64], hint[64];
-    const char *status;
+    int size = height >= 720 ? 3 : 2, x, y;
     menu_plan m;
+    const char *error;
     while (!menu_fit(&m, size, width, height) && size > 1)
         size--;
     if (m.cols < 24 || m.h > (int)height - 16)
@@ -561,32 +547,11 @@ static spo_result menu(uint32_t width, uint32_t height) {
     spo->panel = (spo_rect){x, y, m.w, m.h};
     if (!rectangle(x, y, m.w, m.h, panel_color, 245))
         return SPO_CAPACITY;
-    if (spo->detail) {
-        static const char *titles[] = {"",
-                                       "Overlay / Items",
-                                       "Overlay / Frames",
-                                       "Overlay / System",
-                                       "Overlay / Port counters",
-                                       "Overlay / Port indicators"};
-        snprintf(title, sizeof(title), "%s", titles[spo->detail]);
-    } else
-        snprintf(title, sizeof(title), "%s",
-                 !spo->root                          ? "Overlay"
-                 : spo->root <= (int)spo->page_count ? spo->pages[spo->root - 1].label
-                                                     : "About");
-    if (spo->cursor == -1 && !rectangle(x + 4, y + m.pady, m.w - 8, m.bar, highlight, 255))
-        return SPO_CAPACITY;
-    if (!text(x + (m.w - (int)strlen(title) * m.cw) / 2, y + m.pady + 3, title,
-              palette[SPO_TONE_VALUE], 255))
-        return SPO_CAPACITY;
-    if (!spo->detail && pages > 1 &&
-        (!text(x + m.padx, y + m.pady + 3, "<", palette[SPO_TONE_LABEL], 255) ||
-         !text(x + m.w - m.padx - m.cw, y + m.pady + 3, ">", palette[SPO_TONE_LABEL], 255)))
-        return SPO_CAPACITY;
-    if (!rectangle(x + m.padx, y + m.pady + m.bar + 3, m.w - 2 * m.padx, 1, rule, 255))
+    if (!tab_bar(&m, x, y + m.pady) ||
+        !rectangle(x + m.padx, y + m.pady + m.bar + 3, m.w - 2 * m.padx, 1, rule, 255))
         return SPO_CAPACITY;
     y += m.pady + m.bar + 10;
-    if (spo->root == (int)spo->page_count + 1 && !spo->detail) {
+    if (spo->tab == spo_menu_tabs() - 1) {
         const char *about[] = {"sbc-port-overlay " SPO_VERSION,
                                spo->name,
                                spo->version,
@@ -594,51 +559,28 @@ static spo_result menu(uint32_t width, uint32_t height) {
                                "MIT",
                                "Spleen / BSD-2-Clause",
                                NULL};
-        int row = 0;
+        int row = 0, i;
         for (i = 0; about[i]; i++) {
             int lines = ((int)strlen(about[i]) + m.cols - 1) / m.cols;
             if (lines < 1)
                 lines = 1;
-            if ((row + lines) * m.ch > 10 * m.rowh)
+            if ((row + lines) * m.ch > SPO_MENU_ROWS * m.rowh)
                 break;
             if (!wrapped(&m, x + m.padx, y + row * m.ch, about[i],
                          palette[i < 4 ? SPO_TONE_VALUE : SPO_TONE_DIM], 8))
                 return SPO_CAPACITY;
             row += lines;
         }
-    } else
-        for (i = 0; i < rows; i++) {
-            int ry = y + i * m.rowh, tone;
-            menu_row(i, label, value, &tone);
-            if (i == spo->cursor && !rectangle(x + 4, ry, m.w - 8, m.rowh, highlight, 255))
-                return SPO_CAPACITY;
-            if (!text(x + m.padx, ry + 2, label, palette[SPO_TONE_VALUE], 255) ||
-                !text_right(x + m.w - m.padx, ry + 2, value, palette[tone], 255))
-                return SPO_CAPACITY;
-        }
-    y += 10 * m.rowh + 6;
-    if (!spo->detail && spo->root > 0 && spo->root <= (int)spo->page_count && spo->cursor >= 0) {
-        spo_option *o = spo_menu_option(spo->cursor);
-        if (o && !wrapped(&m, x + m.padx, y, o->help, palette[SPO_TONE_LABEL], 2))
-            return SPO_CAPACITY;
-    }
-    y += 2 * m.ch + 6;
-    status = spo->error == SPO_OK         ? (spo->dirty ? "Unsaved" : "Saved")
-             : spo->error == SPO_REJECTED ? "Setting rejected"
-             : spo->error == SPO_IO       ? "Could not save"
-                                          : "Settings error";
-    status_tone = spo->error != SPO_OK ? SPO_TONE_BAD : spo->dirty ? SPO_TONE_WARN : SPO_TONE_DIM;
-    snprintf(hint, sizeof(hint), "D-pad: change  South: select  East: back");
-    if ((int)(strlen(hint) + strlen(status)) + 2 <= m.cols) {
-        if (!text(x + m.padx, y, hint, palette[SPO_TONE_DIM], 255) ||
-            !text_right(x + m.w - m.padx, y, status, palette[status_tone], 255))
-            return SPO_CAPACITY;
-    } else if (spo->error != SPO_OK || spo->dirty) {
-        if (!text(x + m.padx, y, status, palette[status_tone], 255))
-            return SPO_CAPACITY;
-    } else if (!text(x + m.padx, y, hint, palette[SPO_TONE_DIM], 255))
+    } else if (!menu_rows(&m, x, y))
         return SPO_CAPACITY;
-    return SPO_OK;
+    y += SPO_MENU_ROWS * m.rowh + 6;
+    error = menu_error();
+    if (!wrapped(&m, x + m.padx, y, spo_menu_help(spo->cursor), palette[SPO_TONE_LABEL],
+                 error ? 1 : 2) ||
+        (error && !text(x + m.padx, y + m.ch, error, palette[SPO_TONE_BAD], 255)))
+        return SPO_CAPACITY;
+    y += 2 * m.ch + 6;
+    return menu_footer(&m, x, y) ? SPO_OK : SPO_CAPACITY;
 }
 spo_result spo_layout(uint32_t width, uint32_t height) {
     uint64_t now = spo_now();

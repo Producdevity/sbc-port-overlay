@@ -119,7 +119,7 @@ static void input(void) {
     assert(!spo_menu_is_open());
     spo_handle_input(1, SPO_PADDLE2, 0);
 }
-static void snapshots_and_editing(void) {
+static void snapshots(void) {
     int32_t axes[SPO_AXIS_COUNT] = {0};
     spo_overlay_settings before = {0}, after = {0};
     reset();
@@ -138,11 +138,102 @@ static void snapshots_and_editing(void) {
     tap(SPO_RIGHT);
     assert(spo_overlay_get(&after) == SPO_OK && after.font_scale == before.font_scale + 1);
     tap(SPO_EAST);
-    assert(spo_menu_is_open());
-    tap(SPO_EAST);
     assert(!spo_menu_is_open());
     axes[SPO_LT] = -1;
     assert(spo_input_sync(1, 0, axes) == SPO_INVALID);
+}
+static void menu_navigation(void) {
+    char path[] = "/tmp/spo-menu-XXXXXX";
+    int fd = mkstemp(path), moves = 0;
+    spo_config c = config(path);
+    spo_menu_row row;
+    spo_id page, id;
+    spo_page_desc p = {sizeof(p), "graphics", "Graphics"};
+    spo_option_desc d = {0};
+    spo_counter_desc counter = {sizeof(counter), "objects", "OBJECTS", "", 0};
+    assert(fd >= 0);
+    close(fd);
+    unlink(path);
+    spo_shutdown();
+    assert(spo_init(&c) == SPO_OK);
+    assert(spo_register_page(&p, &page) == SPO_OK);
+    d.struct_size = sizeof(d);
+    d.page = page;
+    d.type = SPO_TOGGLE;
+    d.key = "vsync";
+    d.label = "Vsync";
+    assert(spo_register_option(&d, &id) == SPO_OK);
+    assert(spo_register_counter(&counter, &id) == SPO_OK);
+    assert(spo_menu_tabs() == 4);
+    tap(SPO_GUIDE);
+    assert(spo_menu_is_open() && spo->tab == 0 && spo->cursor == 0);
+    /* L1 and R1 wrap around the tabs from any row. */
+    tap(SPO_L1);
+    assert(spo->tab == 3);
+    tap(SPO_R1);
+    assert(spo->tab == 0);
+    tap(SPO_R1);
+    assert(spo->tab == 1);
+    spo_menu_describe(0, &row);
+    assert(row.kind == SPO_ROW_HEADING && !strcmp(row.label, "Frames"));
+    assert(spo->cursor == 1);
+    /* Headings are skipped and the cursor stops at the ends of the list. */
+    for (int i = 0; i < 60; i++, moves++)
+        tap(SPO_DOWN);
+    spo_menu_describe(spo->cursor, &row);
+    assert(row.kind == SPO_ROW_TOGGLE && !strcmp(row.label, "Overlay cost"));
+    assert(spo->scroll == spo_menu_rows() - SPO_MENU_ROWS);
+    for (int i = 0; i < 60; i++)
+        tap(SPO_UP);
+    assert(spo->cursor == 1 && spo->scroll == 0);
+    /* The port group carries its counters under the port name. */
+    spo->cursor = 0;
+    for (int i = 0; i < spo_menu_rows(); i++) {
+        spo_menu_describe(i, &row);
+        if (row.kind == SPO_ROW_HEADING && !strcmp(row.label, "Test"))
+            moves = i;
+    }
+    spo_menu_describe(moves + 1, &row);
+    assert(!strcmp(row.label, "OBJECTS"));
+    /* A toggle changes the items at once and the preset reads Custom. */
+    spo_menu_home();
+    assert(spo_preset_set(2) == SPO_OK && !spo->overlay.custom);
+    tap(SPO_SOUTH);
+    assert(!(spo->overlay.items & SPO_BIT(SPO_FPS)) && spo->overlay.custom);
+    tap(SPO_SOUTH);
+    assert((spo->overlay.items & SPO_BIT(SPO_FPS)) && !spo->overlay.custom);
+    tap(SPO_LEFT);
+    assert(!(spo->overlay.items & SPO_BIT(SPO_FPS)));
+    /* Values that the kernel does not expose are greyed and skipped. */
+    spo->available_items = 0;
+    for (int i = 0; i < spo_menu_rows(); i++) {
+        spo_menu_describe(i, &row);
+        if (!strcmp(row.label, "Load") && i > 8) {
+            assert(!row.enabled && !strcmp(row.value, "Not available"));
+            break;
+        }
+    }
+    spo->tab = 0;
+    spo_menu_home();
+    tap(SPO_DOWN);
+    tap(SPO_RIGHT);
+    assert(spo->overlay.anchor == 1);
+    /* Closing the menu saves what changed. */
+    assert(spo_config_dirty());
+    tap(SPO_EAST);
+    assert(!spo_menu_is_open() && !spo_config_dirty());
+    {
+        FILE *f = fopen(path, "r");
+        char buf[4096];
+        size_t n;
+        assert(f);
+        n = fread(buf, 1, sizeof(buf) - 1, f);
+        buf[n] = 0;
+        fclose(f);
+        assert(strstr(buf, "anchor=top_center") && strstr(buf, "fps=0"));
+    }
+    unlink(path);
+    spo_shutdown();
 }
 static void anchors(void) {
     int a;
@@ -284,8 +375,8 @@ static void maximal_layout(void) {
     assert(spo_layout(1280, 720) == SPO_OK);
     assert(spo->panel.x >= 8 && spo->panel.x + spo->panel.w <= 1272);
     spo_set_open(1);
-    spo->detail = 3;
-    spo->cursor = 0;
+    spo->tab = 1;
+    spo_menu_home();
     assert(spo_layout(640, 480) == SPO_OK);
     spo_set_open(0);
 }
@@ -403,7 +494,8 @@ static void actions(void) {
     assert(spo_register_option(&d, &id) == SPO_OK);
     assert(!action_calls);
     tap(SPO_GUIDE);
-    spo->root = 1;
+    spo->tab = 2;
+    spo_menu_home();
     spo_handle_input(1, SPO_SOUTH, 1);
     spo_handle_input(1, SPO_SOUTH, 1);
     assert(action_calls == 1);
@@ -701,21 +793,20 @@ static void layouts(void) {
 static void menu_layout(void) {
     reset();
     spo_set_open(1);
-    for (int detail = 0; detail <= 5; detail++)
-        for (int root = 0; root <= 1; root++) {
-            spo->detail = detail;
-            spo->root = detail ? 0 : root;
-            spo->cursor = 0;
-            assert(spo_layout(640, 480) == SPO_OK && spo->mesh.font == 2);
-            assert(spo->panel.x >= 8 && spo->panel.x + spo->panel.w <= 632);
-            assert(spo->panel.y >= 8 && spo->panel.y + spo->panel.h <= 472);
-            assert(spo_layout(1280, 720) == SPO_OK && spo->mesh.font == 3);
-        }
+    for (int tab = 0; tab < spo_menu_tabs(); tab++) {
+        spo->tab = tab;
+        spo_menu_home();
+        assert(spo_layout(640, 480) == SPO_OK && spo->mesh.font == 2);
+        assert(spo->panel.x >= 8 && spo->panel.x + spo->panel.w <= 632);
+        assert(spo->panel.y >= 8 && spo->panel.y + spo->panel.h <= 472);
+        assert(spo_layout(1280, 720) == SPO_OK && spo->mesh.font == 3);
+    }
     spo_set_open(0);
 }
 int main(void) {
     input();
-    snapshots_and_editing();
+    snapshots();
+    menu_navigation();
     anchors();
     presets();
     parsers();

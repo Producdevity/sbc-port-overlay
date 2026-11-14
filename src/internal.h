@@ -95,7 +95,7 @@ typedef struct {
     int frozen, lost, dirty, saving, in_callback;
     spo_result error;
     spo_pad pads[4];
-    int open, drain, root, detail, cursor, editing;
+    int open, drain, tab, cursor, scroll;
     uint64_t intervals[SPO_HISTORY], last_stamp, window_ns, refresh_stamp, history_serial;
     uint32_t history_count, history_next, window_frames;
     double fps, frame_ms, low_1, graph_max, target_fps;
@@ -146,8 +146,23 @@ void spo_apply_preset(uint32_t);
 void spo_overlay_sync(void);
 uint32_t spo_preset_items(uint32_t);
 void spo_numeric_refresh(uint64_t);
+enum { SPO_ROW_NONE, SPO_ROW_HEADING, SPO_ROW_TOGGLE, SPO_ROW_CHOICE, SPO_ROW_SLIDER, SPO_ROW_ACTION };
+#define SPO_MENU_ROWS 10
+typedef struct {
+    int kind;
+    char label[40], value[40];
+    uint8_t tone, enabled;
+} spo_menu_row;
 void spo_menu_button(spo_button);
 int spo_menu_rows(void);
+int spo_menu_tabs(void);
+const char *spo_menu_tab_label(int);
+void spo_menu_describe(int, spo_menu_row *);
+const char *spo_menu_help(int);
+int spo_menu_row_kind(int);
+int spo_menu_repeats(spo_button);
+void spo_menu_home(void);
+void spo_menu_scroll_fit(void);
 spo_option *spo_menu_option(int);
 void spo_input_tick(uint64_t);
 void spo_set_open(int);

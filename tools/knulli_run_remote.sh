@@ -76,7 +76,7 @@ case "$preset" in suite|0|1|2|3|4) ;; *) exit 2;; esac
 case "$mode" in benchmark|capture) ;; *) exit 2;; esac
 case "$duration" in ''|*[!0-9]*) exit 2;; esac
 [ "$duration" -ge 3 ] && [ "$duration" -le 45 ] || exit 2
-case "$menu" in -1|0|1|2) ;; *) exit 2;; esac
+case "$menu" in -1|0|1|2|3) ;; *) exit 2;; esac
 case "$uncapped:$maxitems" in [01]:[01]) ;; *) exit 2;; esac
 case "$work" in ''|*[!0-9]*) exit 2;; esac
 [ "$work" -ge 1 ] && [ "$work" -le 24 ] || exit 2

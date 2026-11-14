@@ -223,19 +223,13 @@ static void report(double *cpu, double *wall, double *gpu, size_t count, size_t 
     fflush(stdout);
 }
 static void select_view(int preset, int menu) {
-    static int selected_root;
     if (spo_menu_is_open())
         pressed(SPO_GUIDE);
     spo_preset_set((uint32_t)preset);
     if (menu >= 0) {
         pressed(SPO_GUIDE);
-        if (menu != selected_root) {
-            pressed(SPO_UP);
-            for (int i = 0; i < (menu - selected_root + 3) % 3; i++)
-                pressed(SPO_RIGHT);
-            pressed(SPO_DOWN);
-            selected_root = menu;
-        }
+        for (int i = 0; i < menu; i++)
+            pressed(SPO_R1);
     }
     spo_reset_timing();
 }
@@ -379,7 +373,7 @@ int main(int argc, char **argv) {
         else {
             fprintf(stderr,
                     "Usage: spo_demo [--seconds 15] [--preset 0..4] [--uncapped] [--gles3] "
-                    "[--menu 0..2] [--capture file.bmp] [--max-items] [--gl4es library] "
+                    "[--menu 0..3] [--capture file.bmp] [--max-items] [--gl4es library] "
                     "[--suite] [--capture-dir directory] [--work 1..24] [--fps 10..240] "
                     "[--trace-input] "
                     "[--backdrop file.bmp] [--size 1..4] [--menu-row 0..8] [--simulate good|bad] "
@@ -387,7 +381,7 @@ int main(int argc, char **argv) {
             return 2;
         }
     }
-    if (!(duration >= 3 && duration <= 480) || preset < 0 || preset > 4 || menu < -1 || menu > 2 ||
+    if (!(duration >= 3 && duration <= 480) || preset < 0 || preset > 4 || menu < -1 || menu > 3 ||
         work < 1 || work > 24)
         return 2;
     if ((fps_limit != 0 && (fps_limit < 10 || fps_limit > 240)) || (trace_input && suite) ||
@@ -396,7 +390,7 @@ int main(int argc, char **argv) {
         return 2;
     if (trace_input)
         capture_mode = 1;
-    phases = suite ? (capture_mode ? 8 : 9) : 1;
+    phases = suite ? 9 : 1;
     if (duration * phases > 480 || (suite && shot) || (capture_mode && suite && !capture_dir))
         return 2;
     signal(SIGTERM, stop);

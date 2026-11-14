@@ -116,7 +116,7 @@ spo_result spo_init(const spo_config *c) {
         return SPO_CAPACITY;
     spo->config = *c;
     spo_text_copy(spo->renderer_name, sizeof(spo->renderer_name), "Headless");
-    spo->cursor = -1;
+    spo->cursor = 0;
     spo->graph_max = 33.333333;
     spo->graph_serial = UINT64_MAX;
     spo->overlay =
