@@ -23,4 +23,12 @@ typedef ptrdiff_t GLsizeiptr;
 #define GL_COLOR_BUFFER_BIT 0x4000
 #define GL_PACK_ALIGNMENT 0x0d05
 #define GL_RGBA 0x1908
+#define GL_TEXTURE_2D 0x0de1
+#define GL_TEXTURE0 0x84c0
+#define GL_TEXTURE_MAG_FILTER 0x2800
+#define GL_TEXTURE_MIN_FILTER 0x2801
+#define GL_TEXTURE_WRAP_S 0x2802
+#define GL_TEXTURE_WRAP_T 0x2803
+#define GL_LINEAR 0x2601
+#define GL_CLAMP_TO_EDGE 0x812f
 #endif

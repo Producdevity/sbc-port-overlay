@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#include "../src/internal.h"
 #include "gl_defs.h"
 #include "spo.h"
 #include <SDL.h>
@@ -45,7 +46,15 @@
     X(const GLubyte *, GetString, (GLenum))                                                        \
     X(void, GetIntegerv, (GLenum, GLint *))                                                        \
     X(void, PixelStorei, (GLenum, GLint))                                                          \
-    X(void, ReadPixels, (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void *))
+    X(void, ReadPixels, (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void *))                  \
+    X(void, ActiveTexture, (GLenum))                                                               \
+    X(void, GenTextures, (GLsizei, GLuint *))                                                      \
+    X(void, DeleteTextures, (GLsizei, const GLuint *))                                             \
+    X(void, BindTexture, (GLenum, GLuint))                                                         \
+    X(void, TexParameteri, (GLenum, GLenum, GLint))                                                \
+    X(void, TexImage2D,                                                                            \
+      (GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *))               \
+    X(void, Uniform1i, (GLint, GLint))
 #define FIELD(ret, name, args) ret(*name) args;
 static struct { FUNCS(FIELD) } gl;
 #undef FIELD
@@ -55,6 +64,50 @@ static int reset_scene;
 static spo_sampling_stats sampling_begin;
 static double warm_cpu_sum, warm_cpu_max;
 static size_t warm_cpu_count;
+/* Fixed readings for review renders; the overlay is otherwise fed by the sampler. */
+static void simulate_readings(int bad) {
+    static const double normal[SPO_ITEM_COUNT] = {
+        [SPO_SYSTEM_CPU] = 34,  [SPO_PROCESS_CPU] = 21, [SPO_GPU_LOAD] = 62,
+        [SPO_CPU_CLOCK] = 1512, [SPO_GPU_CLOCK] = 648,  [SPO_TEMPERATURE] = 52,
+        [SPO_BATTERY] = 87,     [SPO_RSS] = 412,        [SPO_MEM_AVAILABLE] = 503};
+    static const double worn[SPO_ITEM_COUNT] = {
+        [SPO_SYSTEM_CPU] = 97,  [SPO_PROCESS_CPU] = 88, [SPO_GPU_LOAD] = 89,
+        [SPO_CPU_CLOCK] = 1008, [SPO_GPU_CLOCK] = 360,  [SPO_TEMPERATURE] = 83,
+        [SPO_BATTERY] = 8,      [SPO_RSS] = 702,        [SPO_MEM_AVAILABLE] = 41};
+    uint64_t now = spo_now();
+    int i;
+    for (i = SPO_SYSTEM_CPU; i < SPO_SELF_COST; i++)
+        spo->metrics[i] = (spo_metric){bad ? worn[i] : normal[i], now, 1};
+    spo->available_items = SPO_BIT(SPO_ITEM_COUNT) - 1;
+    spo->battery_charging = !bad;
+}
+/* Steady frames with a mild and a hard hitch, or a slow game, for review renders. */
+static uint64_t simulated_interval(int bad, int frame) {
+    if (bad)
+        return (uint64_t)(frame % 7 == 0 ? 61e6 : 41e6 + (frame % 5) * 2e6);
+    return (uint64_t)(frame % 97 == 0 ? 31e6 : frame % 53 == 0 ? 18.4e6 : 16.67e6);
+}
+static GLuint backdrop_texture(const char *path) {
+    SDL_Surface *loaded = SDL_LoadBMP(path), *rgba = NULL;
+    GLuint texture = 0;
+    if (!loaded)
+        return 0;
+    rgba = SDL_ConvertSurfaceFormat(loaded, SDL_PIXELFORMAT_ABGR8888, 0);
+    SDL_FreeSurface(loaded);
+    if (!rgba)
+        return 0;
+    gl.GenTextures(1, &texture);
+    gl.ActiveTexture(GL_TEXTURE0);
+    gl.BindTexture(GL_TEXTURE_2D, texture);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rgba->w, rgba->h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                  rgba->pixels);
+    SDL_FreeSurface(rgba);
+    return texture;
+}
 static void stop(int sig) {
     (void)sig;
     stopped = 1;
@@ -246,7 +299,11 @@ int main(int argc, char **argv) {
     size_t count = 0, gpu_count = 0;
     int preset = 4, uncapped = 0, menu = -1, major = 2, width = 640, height = 480, result = 1, i,
         work = 24, palette = 0, frame_failed = 0, maxitems = 0, capture_mode = 0, suite = 0,
-        phase = 0, phases = 1, fps_limit = 0, trace_input = 0;
+        phase = 0, phases = 1, fps_limit = 0, trace_input = 0, size = 0, simulate = -1,
+        frame_number = 0, menu_row = -1;
+    double capture_after = 0;
+    const char *backdrop = NULL;
+    GLuint backdrop_program = 0, backdrop_tex = 0, backdrop_vs = 0, backdrop_fs = 0;
     double deadline = 0;
     double previous = 0, scene_time = 0;
     const char *shot = NULL, *gl_library = NULL;
@@ -276,6 +333,17 @@ int main(int argc, char **argv) {
             work = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--fps") && i + 1 < argc)
             fps_limit = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--backdrop") && i + 1 < argc)
+            backdrop = argv[++i];
+        else if (!strcmp(argv[i], "--menu-row") && i + 1 < argc)
+            menu_row = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--size") && i + 1 < argc)
+            size = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--simulate") && i + 1 < argc) {
+            const char *mode = argv[++i];
+            simulate = !strcmp(mode, "bad") ? 1 : !strcmp(mode, "good") ? 0 : -2;
+        } else if (!strcmp(argv[i], "--capture-after") && i + 1 < argc)
+            capture_after = strtod(argv[++i], NULL);
         else if (!strcmp(argv[i], "--trace-input"))
             trace_input = 1;
         else if (!strcmp(argv[i], "--input-node") && i + 1 < argc)
@@ -300,18 +368,22 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--gl4es") && i + 1 < argc)
             gl_library = argv[++i];
         else {
-            fprintf(
-                stderr,
-                "Usage: spo_demo [--seconds 15] [--preset 0..4] [--uncapped] [--gles3] "
-                "[--menu 0..2] [--capture file.bmp] [--max-items] [--gl4es library] "
-                "[--suite] [--capture-dir directory] [--work 1..24] [--fps 60] [--trace-input]\n");
+            fprintf(stderr,
+                    "Usage: spo_demo [--seconds 15] [--preset 0..4] [--uncapped] [--gles3] "
+                    "[--menu 0..2] [--capture file.bmp] [--max-items] [--gl4es library] "
+                    "[--suite] [--capture-dir directory] [--work 1..24] [--fps 10..240] "
+                    "[--trace-input] "
+                    "[--backdrop file.bmp] [--size 1..4] [--menu-row 0..8] [--simulate good|bad] "
+                    "[--capture-after seconds]\n");
             return 2;
         }
     }
     if (!(duration >= 3 && duration <= 480) || preset < 0 || preset > 4 || menu < -1 || menu > 2 ||
         work < 1 || work > 24)
         return 2;
-    if ((fps_limit != 0 && fps_limit != 60) || (trace_input && suite))
+    if ((fps_limit != 0 && (fps_limit < 10 || fps_limit > 240)) || (trace_input && suite) ||
+        size < 0 || size > 4 || menu_row < -1 || menu_row > 8 || simulate == -2 ||
+        !(capture_after >= 0 && capture_after + 2 < duration))
         return 2;
     if (trace_input)
         capture_mode = 1;
@@ -392,6 +464,8 @@ int main(int argc, char **argv) {
     config.port_name = "Overlay demo";
     config.port_version = "1.0";
     config.on_pause = pause_game;
+    if (simulate >= 0)
+        config.flags = SPO_INIT_NO_SAMPLER_THREAD;
     if (spo_init(&config) != SPO_OK) {
         fprintf(stderr, "spo_init failed\n");
         goto done;
@@ -401,7 +475,7 @@ int main(int argc, char **argv) {
         spo_option_desc o = {0};
         spo_id option;
         const char *choices[] = {"Ocean", "Forest", "Amber"};
-        spo_counter_desc c = {sizeof(c), "draws", "DRAWS", "", 0};
+        spo_counter_desc c = {sizeof(c), "objects", "OBJECTS", "", 0};
         spo_indicator_desc ind = {sizeof(ind), "shaders", "SHADERS"};
         if (spo_register_page(&p, &page) != SPO_OK)
             goto done;
@@ -468,13 +542,41 @@ int main(int argc, char **argv) {
                 spo_indicator_set(id, (uint32_t)(i % 2));
             }
     }
-    spo_counter_set(counter, 1);
+    spo_counter_set(counter, 24);
     spo_indicator_set(indicator, 0);
+    if (size) {
+        spo_overlay_settings overlay = {sizeof(overlay)};
+        spo_overlay_get(&overlay);
+        overlay.font_scale = (uint32_t)size;
+        spo_overlay_set(&overlay);
+    }
+    if (backdrop) {
+        backdrop_vs = shader(GL_VERTEX_SHADER, "attribute vec2 p;varying vec2 uv;void "
+                                               "main(){uv=vec2(p.x*.5+.5,.5-p.y*.5);gl_Position="
+                                               "vec4(p,0.,1.);}");
+        backdrop_fs = shader(GL_FRAGMENT_SHADER, "precision mediump float;uniform sampler2D "
+                                                 "tex;varying vec2 uv;void "
+                                                 "main(){gl_FragColor=texture2D(tex,uv);}");
+        backdrop_tex = backdrop_texture(backdrop);
+        if (!backdrop_vs || !backdrop_fs || !backdrop_tex) {
+            fprintf(stderr, "Could not load the backdrop (24-bit BMP): %s\n", backdrop);
+            goto done;
+        }
+        backdrop_program = gl.CreateProgram();
+        gl.AttachShader(backdrop_program, backdrop_vs);
+        gl.AttachShader(backdrop_program, backdrop_fs);
+        gl.BindAttribLocation(backdrop_program, 0, "p");
+        gl.LinkProgram(backdrop_program);
+        gl.UseProgram(backdrop_program);
+        gl.Uniform1i(gl.GetUniformLocation(backdrop_program, "tex"), 0);
+    }
     if (suite) {
         preset = 0;
         menu = -1;
     }
     select_view(preset, menu);
+    for (i = 0; menu >= 0 && i <= menu_row; i++)
+        pressed(SPO_DOWN);
     if (capture_dir) {
         snprintf(capture_path, sizeof(capture_path), "%s/preset-0.bmp", capture_dir);
         shot = capture_path;
@@ -619,10 +721,16 @@ int main(int argc, char **argv) {
         gl.ColorMask(1, 1, 1, 1);
         gl.ClearColor(.1f, .15f, .2f, 1);
         gl.Clear(GL_COLOR_BUFFER_BIT);
-        gl.UseProgram(program);
-        gl.Uniform1f(time_uniform, (GLfloat)scene_time);
-        gl.Uniform1f(work_uniform, (GLfloat)work);
-        gl.Uniform1f(palette_uniform, (GLfloat)palette);
+        if (backdrop_program) {
+            gl.UseProgram(backdrop_program);
+            gl.ActiveTexture(GL_TEXTURE0);
+            gl.BindTexture(GL_TEXTURE_2D, backdrop_tex);
+        } else {
+            gl.UseProgram(program);
+            gl.Uniform1f(time_uniform, (GLfloat)scene_time);
+            gl.Uniform1f(work_uniform, (GLfloat)work);
+            gl.Uniform1f(palette_uniform, (GLfloat)palette);
+        }
         gl.BindBuffer(GL_ARRAY_BUFFER, buffer);
         gl.VertexAttribPointer(0, 2, GL_FLOAT, 0, 0, NULL);
         gl.EnableVertexAttribArray(0);
@@ -653,8 +761,12 @@ int main(int argc, char **argv) {
         }
         a = seconds(CLOCK_THREAD_CPUTIME_ID);
         b = seconds(CLOCK_MONOTONIC);
-        spo_counter_set(counter, 1);
+        spo_counter_set(counter, 24);
         spo_indicator_set(indicator, 0);
+        if (simulate >= 0) {
+            simulate_readings(simulate);
+            spo->last_stamp = spo_now() - simulated_interval(simulate, ++frame_number);
+        }
         if (spo_frame((uint32_t)width, (uint32_t)height) != SPO_OK) {
             fprintf(stderr, "spo_frame=%d\n", spo_last_error());
             frame_failed = 1;
@@ -683,7 +795,7 @@ int main(int argc, char **argv) {
             if (cost > warm_cpu_max)
                 warm_cpu_max = cost;
         }
-        if (shot && now - start >= 2) {
+        if (shot && now - start >= capture_after + 2) {
             if (!capture(shot, width, height)) {
                 fprintf(stderr, "Capture failed\n");
                 goto done;
@@ -730,6 +842,14 @@ done:
             gl.DeleteBuffers(1, &buffer);
         if (program)
             gl.DeleteProgram(program);
+        if (backdrop_tex)
+            gl.DeleteTextures(1, &backdrop_tex);
+        if (backdrop_program)
+            gl.DeleteProgram(backdrop_program);
+        if (backdrop_vs)
+            gl.DeleteShader(backdrop_vs);
+        if (backdrop_fs)
+            gl.DeleteShader(backdrop_fs);
         if (vs)
             gl.DeleteShader(vs);
         if (fs)
