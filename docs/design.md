@@ -12,6 +12,15 @@
 > See [the current API contract](api.md#sampling-modes) and
 > [measured verification](verification.md). The synchronous details below record
 > the reviewed draft and are superseded by this amendment.
+>
+> The retained-renderer pass also replaces streaming batches with one geometry
+> buffer, one atlas and one draw per enabled preset/menu. The graph uses a
+> scrolling 120×1 atlas ring; text uploads only when geometry changes. Shader
+> warm-up and all allocation happen at initialization. The current backend
+> contract is in [the API reference](api.md#renderer-state). This pass measures
+> render mean and steady-state p99 against 150 us, total CPU against 0.5% of
+> one core, and GPU against 200 us. Warm-up and steady-state maxima are reported
+> separately.
 
 
 Review this design before implementation. Phase 1 delivers this document only.

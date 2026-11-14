@@ -48,7 +48,10 @@ Only use devices authorized for the current session. Every probe/run must acquir
 check for an existing game, remain below ten minutes and leave two minutes
 between runs. Do not steal locks. Never write audio controls; launch only
 when volume is already 0. Remove owned test artifacts and restore the frontend.
-Use the installed firmware/PortMaster sources for launch behavior.
+Use the installed firmware/PortMaster sources for launch behavior. For the
+current KNULLI cost pass, leave all clock/governor controls untouched and do
+not run mixer, mute or unmute commands. Use only a verified read-only volume
+getter. MuOS is excluded from this pass.
 
 Run captures separately from timing. Report CPU mean/p95/p99/max, GPU query
 validity or A/B uncertainty, present rate, artifact hash and actual device

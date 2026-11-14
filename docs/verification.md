@@ -1,13 +1,24 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # Verification record
 
-**The performance acceptance gate remains unmet.** The approved sampler removes
-telemetry I/O from render frames. Full now averages 87.8 us on the render thread
-plus 0.071% of one core for sampling. Combined cost is 0.598% of one core;
-render peaks and the GPU estimate also exceed their limits. Implementation and
-the design amendment remain uncommitted.
+**KNULLI measurements for the retained renderer are pending.** Baseline
+`e042d59` is committed separately from renderer commits `1234baa` and `47ee521`.
+The numbers below describe that baseline, not the new renderer. Performance
+compliance of the new pass is unverified until the authorized device is free.
 
-## Current muOS measurements
+The new renderer passes Linux GLES2, GLES2 without VAOs, and GLES3 state/pixel
+checks, including one draw for large meshes, retained text, single-texel graph
+updates, unchanged-texel reuse, and initialization failure cleanup with separate
+read/draw framebuffer bindings. Core/sampler checks pass under ASan/UBSan and
+TSan; GL checks also pass under ASan/UBSan with third-party driver leak checks
+disabled. ARM64 static/shared libraries and the demo cross-build.
+
+`tools/run_knulli.sh` now stages only an owned diagnostic directory, suspends
+and resumes the idle frontend, and compares clock policies read-only. It never
+sets or restores governors/clocks or runs mixer commands. Its runtime and the
+installed volume-getter implementation still require device verification.
+
+## Historical muOS baseline measurements
 
 Target: RG35XX-H, muOS 2606.0 Andromeda (`db2a3bd0`), aarch64, kernel
 4.9.170, Mali-G31 proprietary r20p0 GLES 3.2, 640×480. CPU was temporarily
@@ -35,7 +46,7 @@ frame** at 60 fps. It completed ten passes and eighty source reads. Every
 phase verified threaded mode, nice 19 and `SCHED_OTHER` (policy 0). FPS/Timing
 perform no telemetry reads; the worker's wake/publication cost is still counted.
 
-- [Raw current log](evidence/muos-sampler-2026-11-14/60fps.log)
+- [Raw baseline log](evidence/muos-sampler-2026-11-14/60fps.log)
 - [Per-phase render and sampler costs](evidence/muos-sampler-2026-11-14/60fps.csv)
 - [Target, artifact hash and immediate cleanup receipt](evidence/muos-sampler-2026-11-14/target.txt)
 
@@ -127,12 +138,13 @@ but has not been device-tested. It does not change the earlier input evidence.
 
 ## Remaining coverage
 
-The performance limits above remain required and unmet. Telemetry blocking is
-resolved; render-update/submission peaks, Full's combined CPU cost and GPU cost
-remain implementation work.
+The performance limits above remain required. Telemetry blocking is resolved;
+KNULLI timing, GPU estimates, captures and cleanup proof for the new renderer
+remain pending. The historical numbers do not establish its cost.
 
 KNULLI H700 and Spruce RK3566 raw fixtures are retained under `tests/fixtures/`.
 The user explicitly left AmberELEC RK3326 verification pending after SSH timed
 out. KNULLI testing was authorized, but another draw-cost benchmark owned its
-lock. No files were deployed there. Normal KNULLI launch, runtime costs,
+lock. A readiness check after the coordinated pause found a new owner,
+`galaxy-starlet-gate`. No test files were deployed there. KNULLI runtime costs,
 screenshots and cleanup remain unverified.

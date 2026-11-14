@@ -136,7 +136,10 @@ System readers discover/open files at init. On Linux, default initialization
 starts one internal nice-19 `SCHED_OTHER` sampler, with bounded `pread` at most
 once per second per source. Shutdown joins it. Render frames read an atomic
 snapshot without locks or file I/O. No heap allocation or GL storage creation
-occurs per frame. Self cost includes both render CPU and amortized sampler CPU;
+occurs per frame. Every enabled preset/menu uses one draw; text geometry stays
+uploaded between changes. The graph scrolls through an atlas ring, uploading
+only changed raster texels. Initialization warms the shader in a private
+framebuffer. Self cost includes both render CPU and amortized sampler CPU;
 `S` identifies the sampler's contribution.
 
 Hosts that prohibit internal threads set `SPO_INIT_NO_SAMPLER_THREAD` and call
@@ -145,12 +148,14 @@ other integration stays the same. See [both modes](docs/api.md#sampling-modes).
 
 ## Cost and verification
 
-H700 acceptance targets: **<0.5% of one core averaged**, **<150 us CPU/frame**,
+H700 acceptance targets: **<0.5% of one core averaged**, **<150 us render mean and steady-state p99**,
 **<200 us GPU/frame**, zero frame allocations. The approved sampling mode uses one low-priority
 internal thread, whose CPU counts toward the total. At 60 fps the CPU percentage target permits only 83.3 us/frame.
-The current implementation misses these targets.
+The committed baseline missed these targets. The retained-renderer pass
+awaits KNULLI measurements.
 
-Measured on RG35XX-H / muOS 2606.0, CPU fixed at 1.512 GHz, native Mali-G31,
+Baseline `e042d59`, measured on RG35XX-H / muOS 2606.0, CPU fixed at
+1.512 GHz, native Mali-G31,
 640×480, light shader workload paced at 60 submitted presents/s:
 
 | Preset | Render mean / max us | Sampler core % | Total core % | GPU A/B estimate us |
@@ -165,8 +170,7 @@ Full's sampler used 7.155 ms of thread CPU over 10.026 seconds, with ten
 passes and eighty reads. Its CPU cost is included above and in Self. No render
 frame performs telemetry reads or takes sampler locks. Full's CPU p95/p99
 were 160/290 us; cold/warm-up peaks are retained separately in the evidence.
-The strict per-call ceiling, combined Full CPU limit and GPU target remain
-unmet. Mali's empty queries include deferred scene work, so the GPU column
+The baseline missed the steady-state p99, combined Full CPU and GPU targets. Mali's empty queries include deferred scene work, so the GPU column
 is an interleaved A/B estimate. See [raw data and limits](docs/verification.md).
 
 Host core tests, sanitizer checks, four language consumers, ARM64 cross-build,
