@@ -85,7 +85,15 @@ static void simulate_readings(int bad) {
 static uint64_t simulated_interval(int bad, int frame) {
     if (bad)
         return (uint64_t)(frame % 7 == 0 ? 61e6 : 41e6 + (frame % 5) * 2e6);
-    return (uint64_t)(frame % 97 == 0 ? 31e6 : frame % 53 == 0 ? 18.4e6 : 16.67e6);
+    static const double jitter[] = {0.0, 0.2, -0.2, 0.3, -0.3, 0.1, -0.1, 0.25, -0.25, 0.15, -0.15};
+    int at = frame % 120;
+    if (at == 23)
+        return (uint64_t)38e6;
+    if (at == 71)
+        return (uint64_t)27e6;
+    if (at == 104)
+        return (uint64_t)45e6;
+    return (uint64_t)((16.67 + jitter[(frame * 7) % 11]) * 1e6);
 }
 static GLuint backdrop_texture(const char *path) {
     SDL_Surface *loaded = SDL_LoadBMP(path), *rgba = NULL;

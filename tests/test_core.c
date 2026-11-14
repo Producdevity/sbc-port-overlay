@@ -455,13 +455,15 @@ static void graph_ring(void) {
     spo->history_count = spo->history_next = 120;
     spo->history_serial = 120;
     for (int i = 0; i < 120; i++)
-        spo->intervals[i] = 16000000;
+        spo->intervals[i] = 16666000;
     spo->graph_range_at = spo_now();
     assert(spo_layout(640, 480) == SPO_OK);
     uint32_t epoch = spo->mesh.graph_epoch, version = spo->mesh.graph_version;
     uint32_t revision = spo->mesh.revision;
     uint8_t previous[120][4];
     memcpy(previous, spo->mesh.graph_data, sizeof(previous));
+    /* A frame near the target reaches about half of the graph height. */
+    assert(previous[0][0] >= spo->mesh.graph_scale * 2 / 5 && previous[0][0] <= spo->mesh.graph_scale * 3 / 5);
     spo->intervals[120] = 25000000;
     spo->history_count++;
     spo->history_next++;
@@ -472,7 +474,7 @@ static void graph_ring(void) {
     assert(memcmp(previous[0], spo->mesh.graph_data[0], 4));
     assert(!memcmp(previous + 1, spo->mesh.graph_data + 1, 119 * 4));
     for (int i = 0; i < 600; i++) {
-        spo->intervals[spo->history_next] = 16000000;
+        spo->intervals[spo->history_next] = 16666000;
         spo->history_next = (spo->history_next + 1) % SPO_HISTORY;
         if (spo->history_count < SPO_HISTORY)
             spo->history_count++;
@@ -605,7 +607,7 @@ static void sample_metrics(void) {
 }
 static void layouts(void) {
     /* Panel areas of the previous layout at the default size, for the same readings. */
-    static const int before[] = {0, 2760, 4860, 23184, 50400};
+    static const int before[] = {0, 2760, 4860, 23184, 51200};
     spo_id id;
     spo_counter_desc counter = {sizeof(counter), "objects", "DRAWS", "", 0};
     spo_indicator_desc indicator = {sizeof(indicator), "shaders", "SHADERS"};
@@ -641,7 +643,7 @@ static void layouts(void) {
                    !strcmp(find_row("CPU")->cell[1], "1512 MHz"));
             assert(!strcmp(find_row("GPU")->cell[1], "360 MHz") && !find_row("GPU")->cell[0][0]);
             assert(!strcmp(find_row("MEM")->cell[0], "44 MB") &&
-                   !strcmp(find_row("MEM")->cell[1], "796 MB"));
+                   !strcmp(find_row("MEM")->cell[1], "796 free"));
             assert(!strcmp(find_row("TEMP")->cell[0], "42 C") &&
                    !strcmp(find_row("BAT")->cell[0], "94%"));
             assert(!strcmp(find_row("DRAWS")->cell[0], "1") &&

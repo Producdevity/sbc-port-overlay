@@ -232,7 +232,7 @@ static void formatted(uint64_t now) {
         if (visible(SPO_RSS))
             put(r, 0, SPO_TONE_VALUE, 6, "%.0f MB", spo->metrics[SPO_RSS].value);
         if (visible(SPO_MEM_AVAILABLE))
-            put(r, 1, SPO_TONE_VALUE, 8, "%.0f MB", spo->metrics[SPO_MEM_AVAILABLE].value);
+            put(r, 1, SPO_TONE_VALUE, 9, "%.0f free", spo->metrics[SPO_MEM_AVAILABLE].value);
     }
     if (visible(SPO_TEMPERATURE)) {
         v = spo->metrics[SPO_TEMPERATURE].value;
@@ -269,10 +269,8 @@ static void formatted(uint64_t now) {
         r = new_row("SELF");
         if (spo->sampling_stats.sample_frames) {
             put(r, 0, SPO_TONE_DIM, 5, "%.0f us", spo->sampling_stats.total_cpu_us_per_frame);
-            put(r, 1, SPO_TONE_DIM, 8, "S %.0f us", spo->sampling_stats.cpu_us_per_frame);
         } else if (spo->stats.sample_frames) {
             put(r, 0, SPO_TONE_DIM, 5, "%.0f us", spo->stats.cpu_us_mean);
-            put(r, 1, SPO_TONE_DIM, 8, "S --");
         } else
             put(r, 0, SPO_TONE_DIM, 5, "-- us");
     }
@@ -658,23 +656,7 @@ draw_graph:
         uint32_t count = spo->history_count < spo->overlay.graph_samples
                              ? spo->history_count
                              : spo->overlay.graph_samples;
-        if (now - spo->graph_range_at >= UINT64_C(500000000)) {
-            double peak = 33.333333;
-            for (i = 0; i < count; i++) {
-                double ms =
-                    (double)spo
-                        ->intervals[(spo->history_next + SPO_HISTORY - count + i) % SPO_HISTORY] /
-                    1e6;
-                if (ms > peak)
-                    peak = ms;
-            }
-            if (peak >= spo->graph_max) {
-                spo->graph_max = peak;
-                spo->graph_high_at = now;
-            } else if (now - spo->graph_high_at > UINT64_C(5000000000))
-                spo->graph_max = peak;
-            spo->graph_range_at = now;
-        }
+        spo->graph_max = 2000.0 / spo->target_fps;
         int rebuild = spo->graph_pixel_range != spo->graph_max || spo->graph_pixel_scale != g.h ||
                       spo->graph_pixel_target != spo->target_fps ||
                       spo->graph_serial > spo->history_serial ||
@@ -728,11 +710,8 @@ draw_graph:
             if (!rectangle(g.x, line, g.w, thickness, palette[SPO_TONE_VALUE],
                            (uint8_t)(alpha * 90 / 255)))
                 return SPO_CAPACITY;
-            snprintf(spo->graph_label, sizeof(spo->graph_label), "%.0f ms", spo->graph_max);
             spo->graph_label_range = spo->graph_max;
             spo->graph_label_target = spo->target_fps;
-            if (!text_right(g.x + g.w - 2, g.y, spo->graph_label, palette[SPO_TONE_DIM], alpha))
-                return SPO_CAPACITY;
         }
     }
     return SPO_OK;
