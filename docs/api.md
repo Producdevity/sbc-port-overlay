@@ -35,8 +35,9 @@ Up to 8 of each.
 
 ## Input
 
-- Guide pressed and released alone opens the menu. Guide with another button
-  passes through to the firmware.
+- Guide pressed and released alone opens the menu. Pressing another button or
+  moving a stick while Guide is held passes it through to the firmware. A stick
+  that rests off centre does not block the menu.
 - In the menu: the D-pad navigates, South confirms, East goes back. Up on
   the title, then Left/Right, switches pages.
 - While the menu is open, `spo_input_captured()` is true and the overlay

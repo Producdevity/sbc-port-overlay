@@ -12,7 +12,7 @@ static spo_pad *pad_for(uint32_t id) {
             return &spo->pads[i];
         if (!spo->pads[i].used && !empty)
             empty = &spo->pads[i];
-        if (!spo->pads[i].held && !spo->pads[i].axes && !neutral)
+        if (!spo->pads[i].held && !neutral)
             neutral = &spo->pads[i];
     }
     if (!empty && neutral) {
@@ -29,7 +29,7 @@ static spo_pad *pad_for(uint32_t id) {
 static int all_neutral(void) {
     uint32_t i;
     for (i = 0; i < 4; i++)
-        if (spo->pads[i].held || spo->pads[i].axes)
+        if (spo->pads[i].held)
             return 0;
     return 1;
 }
@@ -92,17 +92,14 @@ spo_result spo_input_sync(uint32_t id, uint32_t buttons, const int32_t axes[SPO_
     if (!p)
         return spo_fail(SPO_CAPACITY);
     p->held = buttons;
-    p->axes = 0;
     p->armed = 0;
     p->guide = !!(buttons & SPO_BIT(SPO_GUIDE));
     p->repeat_at = 0;
     for (i = 0; i < SPO_AXIS_COUNT; i++) {
-        int32_t v = axes ? axes[i] : 0;
-        p->axis[i] = v;
-        if (v > 4915 || v < -4915)
-            p->axes |= SPO_BIT(i);
+        p->axis[i] = axes ? axes[i] : 0;
+        p->guide_axis[i] = p->axis[i];
     }
-    p->ready = !p->held && !p->axes;
+    p->ready = !p->held;
     if (!spo->open && all_neutral())
         spo->drain = 0;
     return SPO_OK;
@@ -292,14 +289,15 @@ int32_t spo_handle_input(uint32_t id, spo_button button, uint32_t pressed) {
         return captured;
     bit = SPO_BIT(button);
     if (!!(p->held & bit) == !!pressed) {
-        if (!pressed && !p->held && !p->axes)
+        if (!pressed && !p->held)
             p->ready = 1;
         return captured;
     }
     if (pressed) {
         if (button == SPO_GUIDE) {
-            p->armed = p->ready && !p->held && !p->axes && !spo->drain;
+            p->armed = p->ready && !p->held && !spo->drain;
             p->guide = 1;
+            memcpy(p->guide_axis, p->axis, sizeof(p->axis));
         } else if (p->guide)
             p->armed = 0;
         p->held |= bit;
@@ -323,7 +321,7 @@ int32_t spo_handle_input(uint32_t id, spo_button button, uint32_t pressed) {
         if (p->repeat_button == button)
             p->repeat_at = 0;
     }
-    if (!p->held && !p->axes)
+    if (!p->held)
         p->ready = 1;
     if (!spo->open && all_neutral())
         spo->drain = 0;
@@ -331,7 +329,7 @@ int32_t spo_handle_input(uint32_t id, spo_button button, uint32_t pressed) {
 }
 int32_t spo_handle_axis(uint32_t id, spo_axis axis, int32_t value) {
     spo_pad *p;
-    int magnitude, was;
+    int was;
     if (!spo || spo->in_callback)
         return 0;
     if (axis >= SPO_AXIS_COUNT || value < (axis >= SPO_LT ? 0 : -32768) || value > 32767)
@@ -340,18 +338,10 @@ int32_t spo_handle_axis(uint32_t id, spo_axis axis, int32_t value) {
     if (!p)
         return spo_input_captured();
     was = spo_input_captured();
-    magnitude = value < 0 ? -value : value;
     p->axis[axis] = value;
-    if (magnitude >= 6554) {
-        p->axes |= SPO_BIT(axis);
-        if (p->guide)
-            p->armed = 0;
-    } else if (magnitude <= 4915)
-        p->axes &= ~SPO_BIT(axis);
-    if (!p->held && !p->axes)
-        p->ready = 1;
-    if (!spo->open && all_neutral())
-        spo->drain = 0;
+    /* Sticks may rest off centre, so only movement while Guide is held cancels the tap. */
+    if (p->guide && (value - p->guide_axis[axis] >= 6554 || p->guide_axis[axis] - value >= 6554))
+        p->armed = 0;
     return was;
 }
 void spo_input_tick(uint64_t now) {

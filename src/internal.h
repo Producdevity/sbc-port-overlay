@@ -66,8 +66,8 @@ typedef struct {
     char section[65], key[65], value[161];
 } spo_ini_entry;
 typedef struct {
-    uint32_t id, used, held, axes, armed, guide, ready;
-    int32_t axis[SPO_AXIS_COUNT];
+    uint32_t id, used, held, armed, guide, ready;
+    int32_t axis[SPO_AXIS_COUNT], guide_axis[SPO_AXIS_COUNT];
     uint64_t repeat_at;
     spo_button repeat_button;
 } spo_pad;
