@@ -94,6 +94,14 @@ static int text(int x, int y, const char *value, const uint8_t rgb[3], uint8_t a
 static int text_right(int right, int y, const char *value, const uint8_t rgb[3], uint8_t alpha) {
     return text(right - (int)strlen(value) * face->cw, y, value, rgb, alpha);
 }
+static int glyph(int x, int y, int id, const uint8_t rgb[3], uint8_t alpha) {
+    const spo_glyph *g = spo_glyph_get(spo->mesh.font, id);
+    return quad(x, y + g->yoff, g->w, g->h, (float)g->x / SPO_ATLAS, (float)g->y / SPO_ATLAS,
+                (float)g->w / SPO_ATLAS, (float)g->h / SPO_ATLAS, rgb, alpha);
+}
+static int glyph_width(int id) {
+    return spo_glyph_get(spo->mesh.font, id)->w;
+}
 static void use_font(uint32_t size) {
     face = spo_font_get(size);
     spo->mesh.font = size < 1 ? 1 : size > 4 ? 4 : size;
@@ -447,7 +455,8 @@ static int wrapped(const menu_plan *m, int x, int y, const char *value, const ui
 /* Tabs that fit between the shoulder keys; the active tab stays visible. */
 static int tab_bar(const menu_plan *m, int x, int y) {
     int count = spo_menu_tabs(), first = spo->tab, last = spo->tab, used, i, left, right;
-    int gap = m->cw * 2, room = m->w - 2 * m->padx - 2 * (2 * m->cw) - 2 * m->cw;
+    int gap = m->cw * 2,
+        room = m->w - 2 * m->padx - glyph_width(SPO_GLYPH_L1) - glyph_width(SPO_GLYPH_R1) - 4 * m->cw;
     used = (int)strlen(spo_menu_tab_label(spo->tab)) * m->cw;
     for (;;) {
         int grew = 0;
@@ -472,8 +481,8 @@ static int tab_bar(const menu_plan *m, int x, int y) {
     }
     left = x + m->padx;
     right = x + m->w - m->padx;
-    if (!text(left, y + 3, "L1", palette[SPO_TONE_LABEL], 255) ||
-        !text(right - 2 * m->cw, y + 3, "R1", palette[SPO_TONE_LABEL], 255))
+    if (!glyph(left, y + 3, SPO_GLYPH_L1, palette[SPO_TONE_LABEL], 255) ||
+        !glyph(right - glyph_width(SPO_GLYPH_R1), y + 3, SPO_GLYPH_R1, palette[SPO_TONE_LABEL], 255))
         return 0;
     left = x + (m->w - used) / 2;
     for (i = first; i <= last; i++) {
@@ -523,15 +532,47 @@ static const char *menu_error(void) {
            : spo->error == SPO_IO       ? "Could not save settings"
                                         : "Settings error";
 }
+typedef struct {
+    int glyph;
+    const char *word;
+} hint;
+static int hints_width(const menu_plan *m, const hint *h, int count, int words) {
+    int i, width = 0;
+    for (i = 0; i < count; i++) {
+        width += glyph_width(h[i].glyph);
+        if (words)
+            width += m->cw + (int)strlen(h[i].word) * m->cw;
+        if (i)
+            width += words ? 2 * m->cw : m->cw;
+    }
+    return width;
+}
+/* Words follow the glyphs when they fit; otherwise the glyphs stand alone. */
 static int menu_footer(const menu_plan *m, int x, int y) {
-    int kind = spo_menu_row_kind(spo->cursor), at = x + m->padx;
-    char hint[96];
-    snprintf(hint, sizeof(hint), "Up/Down Move  %s  East Back  Menu Close",
-             kind == SPO_ROW_TOGGLE   ? "South Toggle"
-             : kind == SPO_ROW_ACTION ? "South Run"
-             : kind == SPO_ROW_NONE   ? "L1/R1 Tabs"
-                                      : "Left/Right Change");
-    return text(at, y, hint, palette[SPO_TONE_DIM], 255);
+    int kind = spo_menu_row_kind(spo->cursor), count = 0, i, at, words;
+    hint hints[4];
+    hints[count++] = (hint){SPO_GLYPH_DPAD_UD, "Move"};
+    if (kind == SPO_ROW_CHOICE || kind == SPO_ROW_SLIDER)
+        hints[count++] = (hint){SPO_GLYPH_DPAD_LR, "Change"};
+    else if (kind == SPO_ROW_TOGGLE || kind == SPO_ROW_ACTION)
+        hints[count++] = (hint){SPO_GLYPH_SOUTH, kind == SPO_ROW_ACTION ? "Run" : "Toggle"};
+    hints[count++] = (hint){SPO_GLYPH_EAST, "Back"};
+    hints[count++] = (hint){SPO_GLYPH_MENU, "Close"};
+    words = hints_width(m, hints, count, 1) <= m->cols * m->cw;
+    at = x + m->padx;
+    for (i = 0; i < count; i++) {
+        if (!glyph(at, y, hints[i].glyph, palette[SPO_TONE_LABEL], 255))
+            return 0;
+        at += glyph_width(hints[i].glyph);
+        if (words) {
+            at += m->cw;
+            if (!text(at, y, hints[i].word, palette[SPO_TONE_DIM], 255))
+                return 0;
+            at += (int)strlen(hints[i].word) * m->cw;
+        }
+        at += words ? 2 * m->cw : m->cw;
+    }
+    return 1;
 }
 static spo_result menu(uint32_t width, uint32_t height) {
     int size = height >= 720 ? 3 : 2, x, y;

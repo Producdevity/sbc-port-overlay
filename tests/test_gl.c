@@ -27,7 +27,9 @@ static void texture_subimage(GLenum target, GLint level, GLint x, GLint y, GLsiz
     if (rendering) {
         texture_calls++;
         texture_width = w;
-        assert((y == SPO_ATLAS_GRAPH_ROW && h == 1) || (font_upload && x == 0 && w == SPO_ATLAS));
+        assert((y == SPO_ATLAS_GRAPH_ROW && h == 1) ||
+               (font_upload && ((x == 0 && w == SPO_ATLAS) ||
+                                (x >= 0 && w > 0 && x + w <= SPO_ATLAS && y + h <= SPO_ATLAS_SOLID_Y - 1))));
     }
     glTexSubImage2D(target, level, x, y, w, h, format, type, data);
 }

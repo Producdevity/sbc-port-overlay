@@ -300,6 +300,13 @@ static void upload_font(spo_gl *g, uint32_t size) {
         g->TexSubImage2D(TEXTURE_2D, 0, 0, (GLint)y, SPO_ATLAS, (GLsizei)rows, 0x1908, 0x1401,
                          band);
     }
+    for (uint32_t id = 0; id < SPO_GLYPH_COUNT; id++) {
+        const spo_glyph *glyph = spo_glyph_get(size, (int)id);
+        uint8_t pixels[96 * 32 * 4];
+        spo_glyph_raster(size, (int)id, pixels);
+        g->TexSubImage2D(TEXTURE_2D, 0, glyph->x, glyph->y, glyph->w, glyph->h, 0x1908, 0x1401,
+                         pixels);
+    }
     unpack_restore(g, unpack);
     g->font = size < 1 ? 1 : size > 4 ? 4 : size;
 }

@@ -235,6 +235,46 @@ static void menu_navigation(void) {
     unlink(path);
     spo_shutdown();
 }
+static int overlaps(const spo_glyph *a, int x, int y, int w, int h) {
+    return a->x < x + w && x < a->x + a->w && a->y < y + h && y < a->y + a->h;
+}
+static void glyph_atlas(void) {
+    for (uint32_t size = 1; size <= 4; size++) {
+        const spo_font_info *f = spo_font_get(size);
+        int rows = (95 + f->cols - 1) / f->cols;
+        for (int id = 0; id < SPO_GLYPH_COUNT; id++) {
+            const spo_glyph *g = spo_glyph_get(size, id);
+            uint8_t pixels[96 * 32 * 4];
+            int ink = 0;
+            assert(g->w > 0 && g->w <= 96 && g->h > 0 && g->h <= 28 && g->yoff >= 0);
+            assert(g->x >= 0 && g->x + g->w <= SPO_ATLAS && g->y >= 0 && g->y + g->h <= 253);
+            /* Clear of the glyph cells in use, the solid texel and the graph row. */
+            for (int row = 0; row < rows; row++) {
+                int used = row == rows - 1 ? 95 - row * f->cols : f->cols;
+                assert(!overlaps(g, 0, row * f->ch, used * f->cw, f->ch));
+            }
+            for (int other = 0; other < id; other++)
+                assert(!overlaps(spo_glyph_get(size, other), g->x, g->y, g->w, g->h));
+            spo_glyph_raster(size, id, pixels);
+            for (int i = 0; i < g->w * g->h; i++)
+                ink += pixels[i * 4 + 3] > 0;
+            assert(ink > 0 && ink < g->w * g->h);
+        }
+        /* The active face button is filled, the others are rings. */
+        {
+            const spo_glyph *south = spo_glyph_get(size, SPO_GLYPH_SOUTH);
+            const spo_glyph *east = spo_glyph_get(size, SPO_GLYPH_EAST);
+            uint8_t a[96 * 32 * 4], b[96 * 32 * 4];
+            int cx = south->w / 2, bottom = south->h / 2 + south->h * 32 / 100;
+            int right = east->w / 2 + east->w * 32 / 100, middle = east->h / 2;
+            spo_glyph_raster(size, SPO_GLYPH_SOUTH, a);
+            spo_glyph_raster(size, SPO_GLYPH_EAST, b);
+            assert(a[((size_t)bottom * (size_t)south->w + (size_t)cx) * 4 + 3] == 255);
+            assert(b[((size_t)middle * (size_t)east->w + (size_t)right) * 4 + 3] == 255);
+            assert(b[((size_t)bottom * (size_t)east->w + (size_t)cx) * 4 + 3] < 255);
+        }
+    }
+}
 static void anchors(void) {
     int a;
     for (a = 0; a < 9; a++) {
@@ -807,6 +847,7 @@ int main(void) {
     input();
     snapshots();
     menu_navigation();
+    glyph_atlas();
     anchors();
     presets();
     parsers();

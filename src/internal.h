@@ -186,6 +186,22 @@ spo_result spo_layout(uint32_t, uint32_t);
 spo_rect spo_anchor(uint32_t, uint32_t, int, int, int);
 const spo_font_info *spo_font_get(uint32_t);
 void spo_font_band(uint32_t, uint32_t, uint32_t, uint8_t *);
+enum {
+    SPO_GLYPH_DPAD_UD,
+    SPO_GLYPH_DPAD_LR,
+    SPO_GLYPH_SOUTH,
+    SPO_GLYPH_EAST,
+    SPO_GLYPH_L1,
+    SPO_GLYPH_R1,
+    SPO_GLYPH_MENU,
+    SPO_GLYPH_COUNT
+};
+/* A controller glyph in the atlas; yoff is its top edge relative to a line of text. */
+typedef struct {
+    int x, y, w, h, yoff;
+} spo_glyph;
+const spo_glyph *spo_glyph_get(uint32_t, int);
+void spo_glyph_raster(uint32_t, int, uint8_t *);
 spo_result spo_backend_init(void);
 void spo_backend_shutdown(void);
 spo_result spo_backend_draw(const spo_mesh *, uint32_t, uint32_t, uint32_t *);
