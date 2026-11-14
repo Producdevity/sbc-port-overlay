@@ -549,13 +549,11 @@ static spo_result menu(uint32_t width, uint32_t height) {
         return SPO_CAPACITY;
     y += m.pady + m.bar + 10;
     if (spo->tab == spo_menu_tabs() - 1) {
-        const char *about[] = {"sbc-port-overlay " SPO_VERSION,
-                               spo->name,
-                               spo->version,
-                               spo->renderer_name,
-                               "MIT",
-                               "Spleen / BSD-2-Clause",
-                               NULL};
+        char port[160], renderer[96];
+        const char *about[] = {port, renderer, "Overlay   sbc-port-overlay " SPO_VERSION " (MIT)",
+                               "Font      Spleen (BSD-2-Clause)", NULL};
+        snprintf(port, sizeof(port), "Port      %s %s", spo->name, spo->version);
+        snprintf(renderer, sizeof(renderer), "Renderer  %s", spo->renderer_name);
         int row = 0, i;
         for (i = 0; about[i]; i++) {
             int lines = ((int)strlen(about[i]) + m.cols - 1) / m.cols;
@@ -564,7 +562,7 @@ static spo_result menu(uint32_t width, uint32_t height) {
             if ((row + lines) * m.ch > SPO_MENU_ROWS * m.rowh)
                 break;
             if (!wrapped(&m, x + m.padx, y + row * m.ch, about[i],
-                         palette[i < 4 ? SPO_TONE_VALUE : SPO_TONE_DIM], 8))
+                         palette[i < 2 ? SPO_TONE_VALUE : SPO_TONE_DIM], 8))
                 return SPO_CAPACITY;
             row += lines;
         }
