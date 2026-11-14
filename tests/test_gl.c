@@ -473,6 +473,19 @@ int main(int argc, char **argv) {
     assert(frame(640, 480) == SPO_OK);
     assert(draw_calls == 1 && upload_calls == 0);
     assert(texture_calls == 1 && texture_width == 1);
+    /* Every bar reaches the screen as the ring turns. */
+    spo_reset_timing();
+    for (i = 0; i < 520; i++) {
+        spo_history_push(16666000);
+        spo->last_stamp = 0;
+        assert(frame(640, 480) == SPO_OK);
+        if (i > 130 && i % 3 == 0) {
+            uint8_t row[240 * 4];
+            glReadPixels(12, 480 - 39 - 1, 240, 1, GL_RGBA, GL_UNSIGNED_BYTE, row);
+            for (int column = 0; column < 120; column++)
+                assert(row[(column * 2 + 1) * 4 + 1] > 160 && row[(column * 2) * 4 + 1] > 160);
+        }
+    }
     spo->mesh.graph_version++;
     spo->mesh.graph_head = (spo->mesh.graph_head + 1) % 120;
     rendering = 1;

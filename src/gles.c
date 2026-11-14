@@ -324,7 +324,7 @@ spo_result spo_backend_init(void) {
     const char *fragment_body =
         "void main(){vec3 rgb=c.rgb;float a;if(t.x<0.){float column=floor(-t.x-1.);"
         "if(column<120.-graph.y)discard;"
-        "float slot=mod(column+graph.x,120.);"
+        "float slot=column+graph.x;if(slot>=120.)slot-=120.;"
         "vec4 d=SAMPLE(atlas,vec2((slot+.5)/256.,255.5/256.));"
         "float h=floor(d.r*255.+.5);if(h<=(1.-t.y)*graph.z)discard;"
         "rgb=d.gba;a=c.a;"
