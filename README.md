@@ -3,6 +3,13 @@
 Settings menu and performance overlay for Linux ports on ARM handhelds
 (muOS, KNULLI, ROCKNIX, Spruce, AmberELEC).
 
+<p align="center"><img src="docs/images/overlay-galaxy.gif" alt="The overlay and its settings menu over gameplay on an RG40XX-H" width="640"></p>
+
+<p align="center">
+<img src="docs/images/overlay-menu.png" alt="The Overlay page of the settings menu" width="320">
+<img src="docs/images/overlay-full.png" alt="The Full preset" width="320">
+</p>
+
 - Tap Menu to open it. Menu+button firmware hotkeys keep working.
 - Presets range from an FPS counter to a frame-time graph, CPU/GPU load and
   clocks, temperature, battery and memory. Colour marks values that need
