@@ -2,6 +2,18 @@
 
 # sbc-port-overlay: proposed design
 
+> Implementation amendment approved after the original review: one internal
+> Linux sampler thread replaces synchronous render-thread telemetry. It runs at
+> nice 19 under SCHED_OTHER, polls pre-opened sources at most once per second,
+> publishes an atomic snapshot, and is joined at shutdown. Render frames never
+> lock or read files. `SPO_INIT_NO_SAMPLER_THREAD` plus host-driven `spo_sample()`
+> provides the opt-out. Sampler CPU counts toward Self and the unchanged 0.5%
+> total-core limit. The 150-us render and 200-us GPU limits remain unchanged.
+> See [the current API contract](api.md#sampling-modes) and
+> [measured verification](verification.md). The synchronous details below record
+> the reviewed draft and are superseded by this amendment.
+
+
 Review this design before implementation. Phase 1 delivers this document only.
 All numbers in the mockups are illustrative. No device timings, screenshots,
 firmware compatibility or performance limits have been verified yet.

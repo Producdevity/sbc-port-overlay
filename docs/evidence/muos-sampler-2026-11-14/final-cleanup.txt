@@ -1,0 +1,4 @@
+UTC=2026-11-14T02:11:18Z
+Volume: 0.00 [MUTED]
+7d631961574e54fc1a9cff139753cb62910c2739b26001f6861e0766dc7b6c0f  -
+Original frontend running; no demo process or owned files; schedutil restored; volume 0; owned expired cooldown stamp removed. No audio controls written.

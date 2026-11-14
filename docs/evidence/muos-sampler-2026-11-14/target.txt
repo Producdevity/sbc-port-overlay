@@ -1,0 +1,68 @@
+UTC=2026-11-14T02:01:30Z
+NAME=MustardOS
+VERSION="2606.0 (ANDROMEDA)"
+ID=muos
+VERSION_ID=2606.0
+PRETTY_NAME="MustardOS 2606.0 (ANDROMEDA)"
+ANSI_COLOR="1;33"
+HOME_URL="https://muos.dev/"
+SUPPORT_URL="https://community.muos.dev/"
+BUILD_ID=db2a3bd0
+aarch64
+4.9.170
+ldd (Buildroot) 2.44
+board=rg35xx-h
+model=sun50iw9
+compatible=allwinner,h616
+arm,sun50iw9p1
+audio=Volume: 0.00 [MUTED]
+/sys/devices/system/cpu/online=0-3
+/sys/devices/system/cpu/cpufreq/policy0/scaling_governor=schedutil
+/sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq=1800000
+/sys/devices/system/cpu/cpufreq/policy0/scaling_min_freq=288000
+/sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq=1800000
+/sys/class/devfreq/gpu/cur_freq=360000000
+/sys/class/devfreq/gpu/governor=simple_ondemand
+/sys/class/devfreq/gpu/available_frequencies=360000000 420000000 456000000 504000000 552000000 600000000 648000000 756000000 816000000
+/sys/class/thermal/thermal_zone0/temp=40886
+/sys/class/graphics/fb0/virtual_size=640,960
+2d8b0d83519c3c4d93a8db2e8c7a1e2aa0bc42f326cf2673e632d15627b99993  /tmp/spo-muos-9148/spo_demo
+0bff4989a3437276c6f7141874ceae3e12bacb0bd12da9bc25113f4c758c3cc0  /usr/lib/libSDL2-2.0.so.0
+isolated_diagnostic=frontend_SIGSTOP_SIGCONT
+mode=benchmark preset=suite duration=12 uncapped=0 GLES=2 maxitems=0
+requested_cpu_khz=1512000
+attained_cpu_khz=1512000
+
+BEFORE_CLEANUP
+UTC=2026-11-14T02:03:19Z
+NAME=MustardOS
+VERSION="2606.0 (ANDROMEDA)"
+ID=muos
+VERSION_ID=2606.0
+PRETTY_NAME="MustardOS 2606.0 (ANDROMEDA)"
+ANSI_COLOR="1;33"
+HOME_URL="https://muos.dev/"
+SUPPORT_URL="https://community.muos.dev/"
+BUILD_ID=db2a3bd0
+aarch64
+4.9.170
+ldd (Buildroot) 2.44
+board=rg35xx-h
+model=sun50iw9
+compatible=allwinner,h616
+arm,sun50iw9p1
+audio=Volume: 0.00 [MUTED]
+/sys/devices/system/cpu/online=0-3
+/sys/devices/system/cpu/cpufreq/policy0/scaling_governor=userspace
+/sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq=1512000
+/sys/devices/system/cpu/cpufreq/policy0/scaling_min_freq=288000
+/sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq=1800000
+/sys/class/devfreq/gpu/cur_freq=360000000
+/sys/class/devfreq/gpu/governor=simple_ondemand
+/sys/class/devfreq/gpu/available_frequencies=360000000 420000000 456000000 504000000 552000000 600000000 648000000 756000000 816000000
+/sys/class/thermal/thermal_zone0/temp=42992
+/sys/class/graphics/fb0/virtual_size=640,960
+
+CLEANUP
+cooldown_until_epoch=1794621921
+Cleanup verified: demo removed, same frontend resumed, volume/mute/mixer unchanged
