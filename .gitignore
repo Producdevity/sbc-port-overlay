@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+/build*/
+/install/
+/.local/
+/.agents/
+/examples/rust/target/
+/examples/zig/.zig-cache/
+/examples/zig/zig-out/
+.DS_Store
+._*
+__pycache__/
+*.pyc
+*.ini

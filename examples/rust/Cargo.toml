@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[package]
+name = "spo-example"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+build = "build.rs"
