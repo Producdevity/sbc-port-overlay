@@ -1,214 +1,179 @@
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-# Integration contract
+# API reference
 
-`include/spo.h` is the authoritative C ABI. Public structs use fixed-width
-fields, start with `struct_size`, and config includes `SPO_ABI_VERSION`.
-All calls except manual `spo_sample` are serialized on the host's existing GL
-thread. Port workers hand counter values through their host's synchronization.
-Callbacks never unwind or reenter the library. Getters return borrowed
-version strings or copied structs. Registration copies strings/choice text;
-callback user pointers remain host-owned until shutdown.
+The C ABI lives in `include/spo.h`. Every public struct starts with
+`struct_size`, and `spo_config` also carries `SPO_ABI_VERSION`, so fields can
+be added later without breaking old ports.
+
+All calls except `spo_sample` must come from your GL thread. If a worker
+thread produces a counter value, pass it to the GL thread yourself.
 
 ## Lifecycle
 
-1. Make the intended GLES2/3 context current, fill zeroed `spo_config`, and
-   call `spo_init`. Pass the host's resolver; the library never loads EGL/GL
-   itself. A null config path means in-memory preferences.
-2. Register pages/options/counters/indicators. Registration freezes at the
-   first `spo_frame`. Duplicate keys, invalid ranges, excessive strings and
-   capacity overflow return errors. Never retain stack pointers as callback
-   user data. Labels are bounded UTF-8 bytes; unsupported glyphs render `?`.
-3. Feed all controller events before game input. Clear game-held controls
-   when capture starts; gate polled state while `spo_input_captured()` is true.
-4. Bind the intended presentation framebuffer, draw the game, call
-   `spo_frame` once per actual presentation, then swap. Pass drawable pixels.
-   Continue frames/events while simulation is paused.
-5. At a safe point after menu close and before exit, save dirty config.
-   Handle errors without retrying file I/O every frame.
-6. Shut down while the same context is current. Shutdown signals and joins the
-   internal sampler before closing its descriptors. For context replacement,
-   shut down first and reinit on the new context. If it is lost, call
-   `spo_context_lost()` before shutdown to abandon GL handles safely.
+1. Make your GLES 2 or 3 context current, fill a zeroed `spo_config` and call
+   `spo_init`. The library gets GL functions only through your
+   `get_proc_address`. Leave `config_path` null to keep settings in memory
+   only.
+2. Register your pages, options, counters and indicators. Registration closes
+   at the first `spo_frame`. The registration calls copy every string you pass
+   in. Pointers you give as callback user data must stay valid until shutdown.
+3. Pass controller events to the library before the game sees them (see
+   [Input](#input)).
+4. Each frame: draw the game into the framebuffer you present, call
+   `spo_frame(width, height)` with the drawable size in pixels, then swap.
+   Keep calling it while the menu is open, even if the game is paused.
+5. Save with `spo_config_save()` when `spo_config_dirty()` is set: after the
+   menu closes, or on exit. If a save fails, don't retry it every frame.
+6. Call `spo_shutdown()` while the same context is still current. To switch
+   contexts, shut down and initialise again on the new one. If the context is
+   lost, call `spo_context_lost()` first, so shutdown skips the GL cleanup.
 
-`SPO_INIT_NO_RENDER` explicitly disables GL creation/submission for headless
-unit tests and ABI consumers. It still builds geometry and samples enabled
-metrics. It is not a graphics compatibility test or a GPU benchmark.
+`SPO_INIT_NO_RENDER` runs everything except GL, for unit tests and bindings.
 
-## Sampling modes
+## Settings
 
-On Linux, default initialization starts exactly one internal sampler thread.
-It uses normal `SCHED_OTHER`, priority 0, and nice 19. Initialization verifies
-that policy without changing the calling thread's priority. A thread or policy
-setup failure returns `SPO_THREAD_UNAVAILABLE`; there is no synchronous fallback.
-The non-Linux host smoke examples explicitly select manual mode.
+A port can register up to 8 pages, each with up to 8 options:
 
-Discovery opens proc/sysfs sources once during initialization. The sampler uses
-bounded `pread` calls, at most once per second per source, for enabled telemetry.
-It publishes atomic 32-bit words under a sequence counter. The render thread
-makes one bounded snapshot attempt and retains the previous snapshot if a write
-overlaps. It takes no sampler locks, waits for no reader, and performs no file
-reads. Values older than 1.5 seconds are hidden. A heavily loaded host can delay
-this low-priority thread; stale data is preferable to blocking presentation.
+| Type | Value |
+| --- | --- |
+| Toggle | 0 or 1 |
+| Choice | index into the choice list (up to 16 entries) |
+| Slider | integer between min and max, in steps |
+| Action | a button; it has no stored value |
 
-Hosts that forbid library-created threads set:
+Keys are 1 to 32 characters: lowercase letters, digits, `_` and `-`. Option
+keys only need to be unique within their page. Labels may be up to 24 bytes
+and help text up to 80. Characters outside the font show as `?`.
 
-```c
-config.flags |= SPO_INIT_NO_SAMPLER_THREAD;
-```
+When you register an option, a saved value replaces the default and your
+`on_change` callback runs once. Later changes from the menu call it again:
+return `SPO_OK` to accept the value or an error to keep the old one. Keep the
+callback fast and queue any heavy work. If you reorder a choice list, migrate
+the saved index yourself.
 
-Then call `spo_sample()` from any host-selected thread, typically once per
-second. More frequent calls do not increase source polling beyond one Hz.
-This call can block in kernel file reads; keep it off the render thread to
-preserve that thread's budget. Concurrent manual calls return `SPO_BUSY` for
-the overlapping caller. Calling it in default threaded mode returns
-`SPO_INVALID`. The sampling call does not run callbacks or change the GL
-thread's last-error state. Stop and join host sampling calls **before** calling
-`spo_shutdown`; initialization/shutdown must not race any API call.
+## Counters and indicators
 
-The rest of port integration is identical in both modes. No sampling call is
-required in the default mode. Neither mode allocates heap memory per frame or
-per sampling pass.
+Up to 8 counters and 8 indicators show port values in the overlay.
+- Counters take a finite double with 0 to 3 decimals. Set NaN to hide a
+  counter.
+- An indicator appears once you first set it on or off.
 
-## Settings and values
+Numbers on screen refresh twice a second. The frame-time graph updates every
+frame.
 
-Eight port pages, eight options per page, eight counters and eight indicators.
-Keys are 1..32 ASCII lowercase letters, digits, `_` or `-`; option keys are
-scoped by page. Page labels and option/choice labels permit 24 bytes, help
-80 bytes, choices 16 entries. Counter labels permit 10 bytes and units 4;
-indicators permit 16 label bytes. The public header's result codes distinguish
-invalid input, capacity, registration closure, I/O, GL and callback failures.
-
-Toggle values are 0/1; choices use zero-based indexes. Integer bounds are
-inclusive, step is positive and endpoints/default are aligned. Invalid
-programmatic values are rejected. Menu steps clamp sliders and wrap choices.
-Actions have keys for identity and are never invoked by loading preferences.
-
-On registration, a valid saved value replaces the default and calls
-`on_change(id,value,user)` once. A rejected initial callback fails registration.
-Later callbacks accept with `SPO_OK` or reject without changing the stored
-value. Queue expensive host work rather than blocking in the callback.
-Reordering choices requires a host config migration.
-
-Counters accept finite doubles, with 0..3 decimal places; NaN marks a counter
-unavailable and infinity is rejected. Indicators become available on their
-first On/Off set. Numeric text refreshes at most twice per second; raw frame
-history updates every frame. Counter/indicator IDs belong to their respective
-API namespaces, not the port-option namespace.
-
-`spo_preset_set` replaces item defaults. `spo_overlay_get/set` permit host
-tools to inspect/change the item bit mask, anchor, scale, opacity and graph
-length. Item bits are `1u << SPO_FPS`, etc. Changing items sets Custom.
-Counter/indicator visibility is individually adjustable in their menu pages.
+`spo_preset_set` and `spo_overlay_get`/`spo_overlay_set` change the overlay
+from code: item mask, position, scale, opacity and graph length. Changing
+items by hand turns the preset into Custom.
 
 ## Input
 
-Buttons use physical positions. SDL2 A is South and B is East. Feed mapped
-controller events once; do not feed duplicate joystick button events to a
-second game-input route. Open/close uses Guide down/up with no button or
-active axis before/between the edges. Chord cancellation lasts until Guide
-release. Start/Select alone do nothing. While closed, chord events are not
-delayed, replayed or swallowed by the library.
+Buttons are named by position: South, East, West and North. In SDL2, A is
+South and B is East.
+- **Opening:** the menu opens on a Guide press and release with nothing else
+  pressed in between. A Guide chord, such as Menu+Start for the firmware's exit
+  hotkey, passes through untouched. Start or Select on their own never open
+  the menu.
+- **While open:** the menu takes all controller input. Up/Down move, Left/Right
+  change a value, South confirms and East goes back or closes. Move to the page
+  title with Up, then use Left/Right to switch pages.
+- **Closing:** after the menu closes, buttons that are still held stay
+  captured until they're released, so the game doesn't see a stray press.
+- **Analog:** sticks and triggers count as pressed past 20% and released
+  below 15%. Sticks don't navigate the menu.
+- **Controllers:** up to four controllers are tracked at a time. Disconnecting
+  one, or losing focus, clears its state.
 
-While open, all controller input is consumed. East navigates back or closes a
-root page; South confirms. Focus the header using Up to select root pages
-with Left/Right. Closing drains held buttons/axes until neutral. Event
-consumption cannot undo game state already forwarded earlier, so the host's
-pause handler must clear held gameplay input, and polling must honor capture.
+The SDL helper `spo_handle_sdl_event` never opens devices. Open a new
+controller yourself, then pass its device-added event, so the helper can read
+its current state. Without SDL:
+- call `spo_handle_input` and `spo_handle_axis`;
+- call `spo_input_sync` once when a controller connects;
+- `spo_input_reset` clears one controller.
 
-Analog input uses signed -32768..32767 sticks and 0..32767 triggers. Activation
-at 20% / release at 15% provides chord/drain hysteresis; sticks never navigate
-menus. Track at most four simultaneously active controllers. Removal/focus
-loss resets held/candidate/repeat state. The SDL helper opens no devices:
-the host owns discovery, connection and controller lifetime.
+`on_pause` runs once each time the menu opens or closes. Release any held
+game input there; whether the game pauses is up to you. The library never
+touches audio or firmware hotkeys.
 
-Open an added SDL controller before passing its device-add event to the
-helper; it copies the already-open controller's cached neutral/held state.
-Remapping also resynchronizes that state. Non-SDL hosts can call
-`spo_input_sync(id, button_bits, axes)` once on connection, without generating
-menu actions. A held Guide in that snapshot cannot become a release-only
-menu click. A null axes pointer means all axes are neutral.
+## Threads and sampling
 
-`on_pause` reports menu visibility once per transition; release-drain can
-outlive visibility. The host chooses simulation/audio behavior. No library
-code writes audio controls or modifies firmware hotkeys/mappings.
+On Linux, `spo_init` starts one sampler thread at nice 19 with the normal
+scheduler policy. It opens the `/proc` and `/sys` sources once, then reads
+each at most once a second with `pread`. Values are published atomically. The
+render thread never waits for the sampler: if a read is in progress, it shows
+the previous values. Values older than 1.5 s are hidden.
 
-## Persistence and statistics
+If your port can't have library-owned threads, set
+`SPO_INIT_NO_SAMPLER_THREAD` and call `spo_sample()` from a thread of your own,
+about once a second. It may block on file reads, so keep it off the render
+thread. Stop calling it before `spo_shutdown()`.
 
-INI keys are documented in the design. Settings use `[spo]`, `[spo.items]`,
-`[spo.counters]`, `[spo.indicators]`, and `[port.PAGE_KEY]`. Unknown keys survive
-saves within the fixed 256-entry/64 KiB limit; comments/formatting do not.
-Unsupported file-format versions and oversized files fail initialization.
-Malformed known preferences use defaults with an error status. Only the host
-creates the destination directory; one process owns each config file.
+## Config file
 
-Explicit saves write a unique sibling temp file, fsync, rename, then fsync the
-directory where supported. Failed saves retain dirty state and the last
-complete file. A null config path makes save clear the in-memory dirty flag.
-Shutdown never implicitly writes. `spo_last_error` supplies the last error;
-the host chooses its own logging.
+The INI file has one section for the overlay, two for its items and one per
+port page:
 
-`spo_get_stats` copies CPU mean/max, elapsed mean, sample count and previous
-draw/vertex/read counts. Thread CPU excludes time descheduled or blocked;
-elapsed time includes those waits. External measurement includes timestamp
-overhead. `spo_get_sampling_stats` additionally reports cumulative sampler CPU nanoseconds,
-elapsed nanoseconds, cycles, reads, maximum cycle CPU, scheduling policy, and
-sampling/combined CPU rates. Counters are published once per pass, so they can
-lag by one sampling interval. Compare CPU deltas against the corresponding
-published elapsed deltas, rather than a different wall-clock window.
+```ini
+[spo]
+format=1
+preset=3
+custom=1
+anchor=top_left
+font_scale=2
+background_opacity=65
+text_opacity=100
+graph_samples=120
 
-Default mode accounts the sampler's thread CPU clock, including wakeups and
-publication. Manual mode accounts CPU spent inside successful `spo_sample`
-calls, excluding the host worker's other work. The optional Self item shows
-combined render-plus-sampler CPU us per presented frame, `S` for the sampler's
-contribution, and previous draw count. Sampler cost is amortized using observed
-present cadence. Until a rate is available, it shows `S--`. Sampling runs at one
-Hz; render means cover at least 0.5 seconds, so these are recent estimates with
-different window boundaries. Self cost excludes GPU execution and driver work
-on other threads. Present timestamps describe submitted cadence, not scanout.
+[spo.items]
+fps=1
+frame_time=1
+graph=1
+system_cpu=1
+gpu_load=1
 
-## Renderer state
+[spo.counters]
+draws=1
 
-The backend uses one private geometry buffer with three preallocated regions,
-one shader program, and one 128×64 nearest-filtered atlas. Every enabled preset
-and menu submits exactly one draw; Off submits none. The fixed capacity is
-1,024 quads, sufficient for all supported registrations and menu layouts.
-There is no per-frame resource creation, shader compilation, `glFinish`,
-readback, or error polling.
+[spo.indicators]
+shaders=1
 
-Initialization compiles the shader, uploads the font and allocates all storage.
-It also submits glyph/graph shader paths into a temporary private 1×1 framebuffer
-and waits for completion. That warm-up never draws into the host framebuffer.
-Initialization restores both ES3 draw/read framebuffer bindings and the
-renderbuffer binding, in addition to normal submission state. Initialize outside
-active queries or transform feedback; initialization can block.
+[port.graphics]
+vsync=1
+render_scale=100
+```
 
-Closed-overlay text refreshes at most twice per second. Identical text retains
-its geometry and uploaded storage. A geometry change uploads a coalesced changed
-span into the next region. Ordinary graph updates replace only the newest
-1×1 RGBA texel in an unused atlas row when its raster value changes, with a
-scrolling offset uniform. Identical raster values need no upload. History
-reset, scale or graph-range changes refresh the 120×1 row. No old columns are
-expanded or shifted on the CPU. Raw present intervals remain in the core's
-512-entry history; only graph raster heights are quantized to physical pixels.
+- **Unknown keys** are kept when the file is saved; comments and formatting
+  are not.
+- **Saving** writes a temp file, syncs it and renames it over the old one, so
+  a failed save never leaves a half-written file.
+- **The directory:** your port creates it. Only one process should use a file
+  at a time.
+- **Shutdown** never saves on its own.
 
-The state audit includes program, buffer/VAO/attribute state, texture unit 0
-binding/sampler, blend equations/functions/enables, depth/stencil/cull enables,
-scissor enable, viewport, color mask, sample coverage, and ES3 raster controls.
-Atlas uploads also preserve unpack row length/skips and ES3 unpack-PBO binding.
-Upload pitches already meet alignment requirements. Dither, scissor box, PACK
-state, host texture parameters and texture unit 1 remain untouched. Draw calls
-use the framebuffer the host has bound.
+## Statistics
 
-ES3 pulls four packed 32-bit words per quad from a single 16 KiB uniform block
-using vertex ID, preserving every typed current attribute. It never queries or
-sets those values: their numeric type is not queryable, and querying through a
-different type is undefined in the [ES specification](https://registry.khronos.org/OpenGL/specs/es/3.2/es_spec_3.2.pdf).
-Uniform-buffer binding 0, its range offset/size, and the independent generic
-binding are restored. A zero queried size restores `glBindBufferBase`; nonzero
-ranges restore `glBindBufferRange`. ES2 uses the same retained geometry through
-vertex arrays, with its own VAO when available. Its fallback restores every
-changed array descriptor; both paths restore floating-point current attributes.
+`spo_get_stats` returns the overlay's own render cost: mean and max CPU time
+per frame, draw count and vertex count. `spo_get_sampling_stats` adds the
+sampler's CPU time, read count and scheduling policy.
+- The Self overlay item shows render plus sampler CPU time per frame. `S` is
+  the sampler's share.
+- Frame times are measured when frames are submitted, not when they reach the
+  screen.
 
-End/pause transform feedback and end conditional rendering before calling.
-Host queries must exclude the overlay if they should measure only the game.
-The library cannot undo query results. Call on a complete intended color target.
+## GL state
+
+The overlay uses one vertex buffer, one shader and one 128×64 texture atlas,
+all created in `spo_init`. Each frame it saves the GL state it touches, draws
+once and restores that state:
+- program and texture binding on unit 0, including the ES3 sampler;
+- array buffer, VAO and vertex attributes; on ES3, uniform buffer binding 0;
+- blend equations and functions;
+- the depth, stencil, cull, scissor, blend and sample-coverage enables, and the ES3 rasterizer controls;
+- viewport and color mask;
+- unpack row length and skips, and the unpack buffer binding.
+
+The overlay draws into whatever framebuffer is bound when you call
+`spo_frame`. It never calls `glFinish`, reads pixels back or polls for GL
+errors.
+
+Before calling `spo_frame`, end any transform feedback or conditional
+rendering. If you time the game with GL queries, end them first, or the
+overlay's draw is included.

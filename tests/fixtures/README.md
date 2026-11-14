@@ -1,20 +1,18 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # Device fixtures
 
-`rk3566-spruce` contains read-only captures from the Spruce Miyoo Flip fixture
-target. Its manifest records UTC capture time, kernel and original proc/sysfs
-paths. Capture ran under the shared device lock, without launching an app,
-stopping the frontend or changing audio. The process fixture is the capture
-utility's own process; no personal process names were collected.
+Real `/proc` and `/sys` files copied from handhelds, used by the metric
+parser tests. Each folder's manifest lists the original paths, the kernel and
+the capture time. `tools/capture_fixtures.sh HOST` makes a new set; it only
+reads files.
 
-The GPU's load format is `0@200000000Hz`, current frequency is in Hz, and the
-selected SoC thermal zone is `soc-thermal` with temperature in millidegrees C.
-CPUFreq is in kHz. Battery exposes capacity and status separately.
+**`rk3566-spruce`** (Miyoo Flip, Spruce):
+- GPU load reads like `0@200000000Hz`, and the GPU clock is in Hz.
+- SoC temperature is in thermal zone `soc-thermal`, in millidegrees C.
+- CPU frequency is in kHz.
+- Battery capacity and status are separate files.
 
-`h700-knulli` contains the corresponding H700 capture (KNULLI 2026-05-11,
-kernel 4.9.170). CPU temperature is `cpu_thermal_zone`; devfreq `gpu` exposes
-clock but no readable load/utilization file in the captured candidates.
-That GPU load item stays unavailable. The read-only volume probe reported 0.
-
-RK3326/AmberELEC capture is pending SSH availability. Missing fixtures must
-not be replaced by synthetic data presented as device captures.
+**`h700-knulli`** (H700, KNULLI 2026-05-11, kernel 4.9.170):
+- CPU temperature is `cpu_thermal_zone`.
+- The `gpu` devfreq node reports a clock but no load, so the GPU load item is
+  hidden on this device.

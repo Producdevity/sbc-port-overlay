@@ -1,15 +1,30 @@
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # Contributing
 
-Use C11 with the public C ABI in `include/spo.h`. Keep GL/SDL types out of the
-core and public header. New renderer operations need a state-audit entry and
-a real-context isolation test. Preserve zero frame allocations, bounded storage,
-one internal nice-19 SCHED_OTHER sampler and its threadless opt-out. Telemetry
-reads stay off the render thread and run at most once per second per source.
-Render frames must never wait for the sampler or take its locks. Add SPDX headers to
-source/build scripts. Keep comments limited to non-obvious constraints.
+## Ground rules
 
-Run the host tests and consumers described in README. For sanitizers:
+- **Language:** C11. The public API is the C ABI in `include/spo.h`. GL and
+  SDL types stay out of the core and the public header.
+- **Per frame:** no allocations, no file I/O, no locks shared with the
+  sampler thread. Each enabled preset or menu page draws in exactly one call.
+- **GL state:** any GL state the backend changes has to be saved and restored.
+  Add it to the state list in [docs/api.md](docs/api.md#gl-state) and cover it
+  in `tests/test_gl.c`.
+- **Sampler:** keep it to one thread at nice 19, reading each source at most
+  once a second. The `SPO_INIT_NO_SAMPLER_THREAD` mode has to keep working.
+- **Source files:** start with an SPDX header. Comments explain only what the
+  code can't, such as a spec rule or a driver quirk.
+
+## Tests
+
+Host tests:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+With AddressSanitizer and UBSan:
 
 ```sh
 cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug \
@@ -20,43 +35,34 @@ cmake --build build-asan
 ctest --test-dir build-asan --output-on-failure
 ```
 
-The optional Linux renderer suite uses EGL surfaceless Mesa, including ES2
-with/without VAOs and ES3. `tools/Dockerfile` pins the Debian image and package
-snapshot. Package changes occur only inside that build image.
+If you change how the sampler publishes values or how it starts and stops, run
+the sampler tests under ThreadSanitizer as well.
 
-Linux sampler tests check thread/descriptor cleanup, unchanged caller priority,
-the worker's policy, manual-mode concurrency, source read rate, and render frames
-while a sampler read is blocked. Run these under ThreadSanitizer when changing
-publication or lifetime rules. A plain payload protected only by a sequence
-counter would still be a C data race; keep the payload atomic.
+The GLES state tests run in a pinned Debian image with Mesa's surfaceless EGL.
+They cover ES2 with and without VAOs, and ES3:
 
 ```sh
-docker build -f tools/Dockerfile -t sbc-port-overlay-dev:bookworm .
+docker build -f tools/Dockerfile -t sbc-port-overlay-dev .
 mkdir -p build-linux
 docker run --rm --network none -v "$PWD:/work:ro" \
-  -v "$PWD/build-linux:/work/build-linux" sbc-port-overlay-dev:bookworm \
+  -v "$PWD/build-linux:/work/build-linux" sbc-port-overlay-dev \
   sh -c 'cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DSPO_BUILD_GL_TESTS=ON -DSPO_BUILD_EXAMPLES=ON && cmake --build build-linux && ctest --test-dir build-linux --output-on-failure'
 ```
 
-For ARM64 Linux, pass the port's normal CMake toolchain or use
-`cmake/zig-aarch64.cmake` with Zig installed. The supplied toolchain selects
-glibc 2.17; SDL demo linking must use the target's SDL2 ABI, not a host library.
-Do not ship SDL2, drivers or system libraries with the demo.
+## Cross-compiling
 
-Fixture and device work follows the task's shared lock and cooldown rules.
-Only use devices authorized for the current session. Every probe/run must acquire `/tmp/pm-device-lock`,
-check for an existing game, remain below ten minutes and leave two minutes
-between runs. Do not steal locks. Never write audio controls; launch only
-when volume is already 0. Remove owned test artifacts and restore the frontend.
-Use the installed firmware/PortMaster sources for launch behavior. For the
-current KNULLI cost pass, leave all clock/governor controls untouched and do
-not run mixer, mute or unmute commands. Use only a verified read-only volume
-getter. MuOS is excluded from this pass.
+Use your port's aarch64 toolchain file, or `cmake/zig-aarch64.cmake` with Zig
+installed. The Zig toolchain targets glibc 2.17. Link the demo against the
+target's SDL2, never the host's.
 
-Run captures separately from timing. Report CPU mean/p95/p99/max, GPU query
-validity or A/B uncertainty, present rate, artifact hash and actual device
-identity. Never replace unavailable device evidence with host results.
+## Measuring on a device
 
-Keep personal/host paths, build products and downloaded runtime binaries out
-of version control. Pin fetched inputs. Do not commit, push, deploy or create
-a repository without the user's explicit authorization for that action.
+`tools/run_knulli.sh` and `tools/run_muos.sh` copy the demo to a handheld,
+run each preset against an overlay-off baseline and summarise the results.
+Set `SPO_SSH_HOST` to the device's SSH host. Keep the screenshot runs separate
+from the timing runs.
+
+## Pull requests
+
+- Keep build output and personal paths out of commits.
+- Pin anything the build fetches.
