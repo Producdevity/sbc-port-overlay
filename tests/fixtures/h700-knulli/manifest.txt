@@ -1,0 +1,28 @@
+captured_utc=2026-11-13T21:27:48Z
+previous_run=1794603427
+aarch64
+4.9.170
+NAME=Batocera.linux
+VERSION=42
+OS_NAME="knulli"
+OS_DATE=20260511
+_proc_stat	/proc/stat
+_proc_self_stat	/proc/self/stat
+_proc_meminfo	/proc/meminfo
+_sys_devices_system_cpu_cpufreq_policy0_scaling_cur_freq	/sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
+_sys_devices_system_cpu_cpu0_cpufreq_scaling_cur_freq	/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+_sys_class_devfreq_gpu_cur_freq	/sys/class/devfreq/gpu/cur_freq
+_sys_class_thermal_thermal_zone0_type	/sys/class/thermal/thermal_zone0/type
+_sys_class_thermal_thermal_zone1_type	/sys/class/thermal/thermal_zone1/type
+_sys_class_thermal_thermal_zone2_type	/sys/class/thermal/thermal_zone2/type
+_sys_class_thermal_thermal_zone3_type	/sys/class/thermal/thermal_zone3/type
+_sys_class_thermal_thermal_zone4_type	/sys/class/thermal/thermal_zone4/type
+_sys_class_thermal_thermal_zone0_temp	/sys/class/thermal/thermal_zone0/temp
+_sys_class_thermal_thermal_zone1_temp	/sys/class/thermal/thermal_zone1/temp
+_sys_class_thermal_thermal_zone2_temp	/sys/class/thermal/thermal_zone2/temp
+_sys_class_thermal_thermal_zone3_temp	/sys/class/thermal/thermal_zone3/temp
+_sys_class_thermal_thermal_zone4_temp	/sys/class/thermal/thermal_zone4/temp
+_sys_class_power_supply_axp2202-battery_type	/sys/class/power_supply/axp2202-battery/type
+_sys_class_power_supply_axp2202-usb_type	/sys/class/power_supply/axp2202-usb/type
+_sys_class_power_supply_axp2202-battery_capacity	/sys/class/power_supply/axp2202-battery/capacity
+_sys_class_power_supply_axp2202-battery_status	/sys/class/power_supply/axp2202-battery/status

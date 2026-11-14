@@ -1,0 +1,39 @@
+captured_utc=2026-11-13T21:02:13Z
+previous_run=1794603444
+aarch64
+5.10.160
+NAME=Buildroot
+VERSION=2021.11
+_proc_stat	/proc/stat
+_proc_self_stat	/proc/self/stat
+_proc_meminfo	/proc/meminfo
+_sys_devices_system_cpu_cpufreq_policy0_scaling_cur_freq	/sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
+_sys_devices_system_cpu_cpu0_cpufreq_scaling_cur_freq	/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+_sys_class_devfreq_dmc_name	/sys/class/devfreq/dmc/name
+_sys_class_devfreq_fde40000.npu_name	/sys/class/devfreq/fde40000.npu/name
+_sys_class_devfreq_fde60000.gpu_name	/sys/class/devfreq/fde60000.gpu/name
+_sys_class_devfreq_fdf40000.rkvenc_name	/sys/class/devfreq/fdf40000.rkvenc/name
+_sys_class_devfreq_fdf80200.rkvdec_name	/sys/class/devfreq/fdf80200.rkvdec/name
+_sys_class_devfreq_dmc_cur_freq	/sys/class/devfreq/dmc/cur_freq
+_sys_class_devfreq_fde40000.npu_cur_freq	/sys/class/devfreq/fde40000.npu/cur_freq
+_sys_class_devfreq_fde60000.gpu_cur_freq	/sys/class/devfreq/fde60000.gpu/cur_freq
+_sys_class_devfreq_fdf40000.rkvenc_cur_freq	/sys/class/devfreq/fdf40000.rkvenc/cur_freq
+_sys_class_devfreq_fdf80200.rkvdec_cur_freq	/sys/class/devfreq/fdf80200.rkvdec/cur_freq
+_sys_class_devfreq_dmc_load	/sys/class/devfreq/dmc/load
+_sys_class_devfreq_fde40000.npu_load	/sys/class/devfreq/fde40000.npu/load
+_sys_class_devfreq_fde60000.gpu_load	/sys/class/devfreq/fde60000.gpu/load
+_sys_class_devfreq_fdf40000.rkvenc_load	/sys/class/devfreq/fdf40000.rkvenc/load
+_sys_class_devfreq_fdf80200.rkvdec_load	/sys/class/devfreq/fdf80200.rkvdec/load
+_sys_class_thermal_thermal_zone0_type	/sys/class/thermal/thermal_zone0/type
+_sys_class_thermal_thermal_zone1_type	/sys/class/thermal/thermal_zone1/type
+_sys_class_thermal_thermal_zone2_type	/sys/class/thermal/thermal_zone2/type
+_sys_class_thermal_thermal_zone0_temp	/sys/class/thermal/thermal_zone0/temp
+_sys_class_thermal_thermal_zone1_temp	/sys/class/thermal/thermal_zone1/temp
+_sys_class_thermal_thermal_zone2_temp	/sys/class/thermal/thermal_zone2/temp
+_sys_class_power_supply_ac_type	/sys/class/power_supply/ac/type
+_sys_class_power_supply_battery_type	/sys/class/power_supply/battery/type
+_sys_class_power_supply_usb_type	/sys/class/power_supply/usb/type
+_sys_class_power_supply_battery_capacity	/sys/class/power_supply/battery/capacity
+_sys_class_power_supply_ac_status	/sys/class/power_supply/ac/status
+_sys_class_power_supply_battery_status	/sys/class/power_supply/battery/status
+_sys_class_power_supply_usb_status	/sys/class/power_supply/usb/status
