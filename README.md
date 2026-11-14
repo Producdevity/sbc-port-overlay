@@ -9,6 +9,10 @@ runtime; SDL2 is an optional adapter.
 The approved [design](docs/design.md) defines the UI and behavior.
 [API details](docs/api.md) cover ownership, callbacks, persistence and input.
 
+For porting, packaging and testing on the handhelds themselves, see the
+[handheld development skill](https://github.com/Producdevity/sbc-handheld-development-skill)
+for AI coding agents.
+
 ## Build
 
 ```sh
