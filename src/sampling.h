@@ -2,6 +2,7 @@
 #ifndef SPO_SAMPLING_H
 #define SPO_SAMPLING_H
 #include "internal.h"
+#include "mali.h"
 #include <pthread.h>
 #include <stdatomic.h>
 enum {
@@ -31,6 +32,9 @@ struct spo_sampler {
     pthread_cond_t condition;
     int mutex_ready, condition_ready, thread_started, ready;
     int nice_value, policy;
+    spo_mali *mali;
+    int hw_load, hw_failed, hw_baseline;
+    uint64_t hw_stamp, hw_due;
 };
 void spo_readers_init(spo_sampler *);
 void spo_readers_close(spo_sampler *);

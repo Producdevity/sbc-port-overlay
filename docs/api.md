@@ -58,6 +58,10 @@ thread uses the latest values without waiting. With
 `SPO_INIT_NO_SAMPLER_THREAD` there is no thread: call `spo_sample()` from your
 own, and stop before `spo_shutdown()`.
 
+GPU load comes from the devfreq `load` file. Without one, it comes from the Mali
+GPU_ACTIVE hardware counter (kbase job manager driver 11.x, `/dev/mali0`), read once a
+second while the item is shown; if the counter reader cannot start, the value shows "Not available".
+
 ## Overlay items
 
 Each value is its own toggle and sits in a fixed column, so rows line up. A row

@@ -73,7 +73,7 @@ typedef struct {
 } spo_pad;
 typedef struct {
     int fd, kind;
-    uint32_t needs, failures;
+    uint32_t needs, failures, also;
     uint64_t due;
 } spo_source;
 typedef struct {

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #include "internal.h"
+#include "mali.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -336,6 +337,27 @@ static void parsers(void) {
     assert(!spo_parse_gpu_load("nan", &d));
     assert(!spo_parse_gpu_load("42@badHz", &d));
     assert(!spo_parse_gpu_load("42@1MHz", &d));
+}
+static void gpu_counters(void) {
+    double d = -1;
+    uint8_t block[256] = {0};
+    uint32_t value = 1234567;
+    assert(spo_gpu_load_percent(325000000, 650, 1000000000, &d) && fabs(d - 50) < 1e-9);
+    assert(spo_gpu_load_percent(0, 650, 1000000000, &d) && d == 0);
+    assert(spo_gpu_load_percent(900000000, 650, 1000000000, &d) && d == 100);
+    assert(spo_gpu_load_percent(50000000, 100, 500000000, &d) && fabs(d - 100) < 1e-9);
+    assert(!spo_gpu_load_percent(1, 0, 1000000000, &d));
+    assert(!spo_gpu_load_percent(1, NAN, 1000000000, &d));
+    assert(!spo_gpu_load_percent(1, 650, 0, &d));
+    memcpy(block + 6 * 4, &value, sizeof(value));
+    assert(spo_mali_jm_active(block) == value);
+    assert(spo_mali_gpu_supported(0x70930000) && !spo_mali_gpu_supported(0x07500000) &&
+           !spo_mali_gpu_supported(0));
+    spo_mali_device = "/nonexistent/mali0";
+    assert(!spo_mali_open(spo_mali_device));
+    spo_mali_device = "/dev/null";
+    assert(!spo_mali_open(spo_mali_device));
+    spo_mali_device = "/dev/mali0";
 }
 static void fixtures(void) {
     static const char *names[] = {"_proc_stat",
@@ -899,6 +921,7 @@ int main(void) {
     anchors();
     presets();
     parsers();
+    gpu_counters();
     fixtures();
     persistence();
     actions();

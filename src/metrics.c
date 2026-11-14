@@ -136,7 +136,7 @@ static int source(spo_sampler *sample, const char *path, int kind, uint32_t need
     fd = open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0)
         return 0;
-    sample->sources[sample->source_count++] = (spo_source){fd, kind, needs, 0, 0};
+    sample->sources[sample->source_count++] = (spo_source){fd, kind, needs, 0, 0, 0};
     return 1;
 }
 static void first_glob(spo_sampler *sample, const char *pattern, int kind, uint32_t needs) {
@@ -188,6 +188,70 @@ int spo_parse_gpu_load(const char *text, double *out) {
     *out = value;
     return 1;
 }
+/* Without a devfreq load file, GPU load comes from the Mali job manager's GPU_ACTIVE counter and
+ * the devfreq clock. The probe here fixes whether the item is available; the reader itself is only
+ * open while the item is shown. */
+static void hw_load_init(spo_sampler *sample) {
+    uint32_t i;
+    for (i = 0; i < sample->source_count; i++) {
+        if (sample->sources[i].kind == GPU_LOAD)
+            return;
+    }
+    for (i = 0; i < sample->source_count; i++)
+        if (sample->sources[i].kind == GPU_CLOCK) {
+            spo_mali *probe = spo_mali_open(spo_mali_device);
+            if (!probe)
+                return;
+            sample->sources[i].also = SPO_BIT(SPO_GPU_LOAD);
+            sample->hw_load = 1;
+            if (atomic_load(&sample->enabled) & SPO_BIT(SPO_GPU_LOAD))
+                sample->mali = probe;
+            else
+                spo_mali_close(probe);
+            return;
+        }
+}
+static void metric(spo_sampler *, int, double, uint64_t);
+static void hw_load_poll(spo_sampler *sample, uint32_t mask) {
+    uint64_t now = spo_now(), active, stamp;
+    double load;
+    if (!sample->hw_load || sample->hw_failed)
+        return;
+    if (!(mask & SPO_BIT(SPO_GPU_LOAD))) {
+        spo_mali_close(sample->mali);
+        sample->mali = NULL;
+        sample->hw_baseline = 0;
+        return;
+    }
+    if (!sample->mali) {
+        sample->mali = spo_mali_open(spo_mali_device);
+        if (!sample->mali) {
+            sample->hw_failed = 1;
+            sample->live[SPO_GPU_LOAD].valid = 0;
+            return;
+        }
+        sample->hw_baseline = 0;
+        sample->hw_due = 0;
+    }
+    if (now < sample->hw_due)
+        return;
+    sample->hw_due = now + UINT64_C(1000000000);
+    if (!spo_mali_dump(sample->mali, &active, &stamp)) {
+        spo_mali_close(sample->mali);
+        sample->mali = NULL;
+        sample->hw_failed = 1;
+        sample->live[SPO_GPU_LOAD].valid = 0;
+        return;
+    }
+    if (sample->hw_baseline && stamp > sample->hw_stamp && sample->live[SPO_GPU_CLOCK].valid &&
+        spo_gpu_load_percent(active, sample->live[SPO_GPU_CLOCK].value, stamp - sample->hw_stamp,
+                             &load))
+        metric(sample, SPO_GPU_LOAD, load, spo_now());
+    else
+        sample->live[SPO_GPU_LOAD].valid = 0;
+    sample->hw_stamp = stamp;
+    sample->hw_baseline = 1;
+}
 void spo_readers_init(spo_sampler *sample) {
     glob_t matches;
     size_t i;
@@ -212,6 +276,7 @@ void spo_readers_init(spo_sampler *sample) {
                SPO_BIT(SPO_GPU_LOAD));
     first_glob(sample, "/sys/class/devfreq/*mali*/cur_freq", GPU_CLOCK, SPO_BIT(SPO_GPU_CLOCK));
     first_glob(sample, "/sys/class/devfreq/*mali*/load", GPU_LOAD, SPO_BIT(SPO_GPU_LOAD));
+    hw_load_init(sample);
     memset(&matches, 0, sizeof(matches));
     if (!glob("/sys/class/thermal/thermal_zone*", 0, NULL, &matches))
         for (i = 0; i < matches.gl_pathc; i++) {
@@ -246,11 +311,14 @@ void spo_readers_init(spo_sampler *sample) {
     (void)type;
     (void)source;
     (void)first_glob;
+    (void)hw_load_init;
     (void)read_init;
 #endif
 }
 void spo_readers_close(spo_sampler *sample) {
     uint32_t i;
+    spo_mali_close(sample->mali);
+    sample->mali = NULL;
     for (i = 0; i < sample->source_count; i++)
         close(sample->sources[i].fd);
 }
@@ -328,7 +396,7 @@ void spo_readers_poll(spo_sampler *sample, uint64_t now, uint32_t mask) {
         spo_source *s = &sample->sources[i];
         ssize_t n;
         uint64_t read_now = spo_now();
-        if (s->failures < 3 && (s->needs & mask) && read_now >= s->due) {
+        if (s->failures < 3 && ((s->needs | s->also) & mask) && read_now >= s->due) {
             s->due = read_now + UINT64_C(1000000000);
             n = pread(s->fd, sample->read_buffer, sizeof(sample->read_buffer) - 1, 0);
             sample->reads++;
@@ -351,5 +419,8 @@ void spo_readers_poll(spo_sampler *sample, uint64_t now, uint32_t mask) {
         if (s->failures < 3)
             sample->available |= s->needs;
     }
+    if (sample->hw_load && !sample->hw_failed)
+        sample->available |= SPO_BIT(SPO_GPU_LOAD);
+    hw_load_poll(sample, mask);
     (void)now;
 }
