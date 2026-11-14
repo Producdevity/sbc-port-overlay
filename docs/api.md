@@ -168,42 +168,46 @@ on other threads. Present timestamps describe submitted cadence, not scanout.
 
 ## Renderer state
 
-The backend uses a private atlas/program and three fixed streaming buffers.
-ES2 uses vertex buffers; ES3 submits at most 341 quads per uniform-buffer batch.
-With VAOs it uses its
-own VAO; the ES2 fallback restores all descriptors it changes. Actual
-host state is queried each submission. No per-frame resource creation,
-shader compilation, `glFinish`, readback or GL error polling occurs.
+The backend uses one private geometry buffer with three preallocated regions,
+one shader program, and one 128×64 nearest-filtered atlas. Every enabled preset
+and menu submits exactly one draw; Off submits none. The fixed capacity is
+1,024 quads, sufficient for all supported registrations and menu layouts.
+There is no per-frame resource creation, shader compilation, `glFinish`,
+readback, or error polling.
 
-The baseline state audit is in [the design's state table](design.md#core-gles-backend-and-state-isolation).
-It includes program, buffer/VAO/attribute state, texture unit/binding/sampler,
-blend, depth/stencil/cull enables, scissor enable, viewport, color mask, coverage,
-ES3 raster controls, and atlas-upload unpack state. Dither, host framebuffer,
-host texture parameters, PACK state and untargeted state remain untouched.
+Initialization compiles the shader, uploads the font and allocates all storage.
+It also submits glyph/graph shader paths into a temporary private 1×1 framebuffer
+and waits for completion. That warm-up never draws into the host framebuffer.
+Initialization restores both ES3 draw/read framebuffer bindings and the
+renderbuffer binding, in addition to normal submission state. Initialize outside
+active queries or transform feedback; initialization can block.
 
-The ES3 implementation extends that draft: vertex ID expands compact quad
-blocks, using a VAO without enabled attribute arrays. It never queries or
-sets current generic attribute values. Their
-numeric type is not queryable, and querying them through a different numeric
-type is undefined in the [ES specification](https://registry.khronos.org/OpenGL/specs/es/3.2/es_spec_3.2.pdf).
-This preserves large signed/unsigned host constants exactly. The bounded
-uniform block fits the ES3 minimum 16 KiB capacity; larger meshes
-use additional draws, reported by self cost. Texture unit 1 remains untouched.
-Atlas initialization restores modified unpack/PBO state. Upload pitches are
-already aligned, so unpack alignment and the scissor box remain untouched.
-ES2 saves/restores its floating-point current attributes.
-ES3 also restores uniform-buffer binding 0, its range offset/size, and the
-independent generic uniform-buffer binding. A zero queried range size restores
-`glBindBufferBase`, preserving its behavior after host buffer resize; nonzero
-ranges restore `glBindBufferRange`, as specified in the
-[ES3 buffer-binding queries](https://registry.khronos.org/OpenGL/specs/es/3.0/es_spec_3.0.pdf).
-Identical meshes reuse their immutable uploaded storage. Changed meshes use
-the next preallocated buffer; chunks within a frame have separate aligned ranges.
-The core's graph coverage quad carries packed column heights and spike flags.
-ES3 expands it into bars in the vertex shader; ES2/gl4es expand it into ordinary
-quads in preallocated CPU storage. Both retain raw interval rasterization.
+Closed-overlay text refreshes at most twice per second. Identical text retains
+its geometry and uploaded storage. A geometry change uploads a coalesced changed
+span into the next region. Ordinary graph updates replace only the newest
+1×1 RGBA texel in an unused atlas row, with a scrolling offset uniform. History
+reset, scale or graph-range changes refresh the 120×1 row. No old columns are
+expanded or shifted on the CPU. Raw present intervals remain in the core's
+512-entry history; only graph raster heights are quantized to physical pixels.
+
+The state audit includes program, buffer/VAO/attribute state, texture unit 0
+binding/sampler, blend equations/functions/enables, depth/stencil/cull enables,
+scissor enable, viewport, color mask, sample coverage, and ES3 raster controls.
+Atlas uploads also preserve unpack row length/skips and ES3 unpack-PBO binding.
+Upload pitches already meet alignment requirements. Dither, scissor box, PACK
+state, host texture parameters and texture unit 1 remain untouched. Draw calls
+use the framebuffer the host has bound.
+
+ES3 pulls four packed 32-bit words per quad from a single 16 KiB uniform block
+using vertex ID, preserving every typed current attribute. It never queries or
+sets those values: their numeric type is not queryable, and querying through a
+different type is undefined in the [ES specification](https://registry.khronos.org/OpenGL/specs/es/3.2/es_spec_3.2.pdf).
+Uniform-buffer binding 0, its range offset/size, and the independent generic
+binding are restored. A zero queried size restores `glBindBufferBase`; nonzero
+ranges restore `glBindBufferRange`. ES2 uses the same retained geometry through
+vertex arrays, with its own VAO when available. Its fallback restores every
+changed array descriptor; both paths restore floating-point current attributes.
 
 End/pause transform feedback and end conditional rendering before calling.
 Host queries must exclude the overlay if they should measure only the game.
-The library cannot undo query results. Call on a complete intended color
-target; it never binds a default framebuffer for the host.
+The library cannot undo query results. Call on a complete intended color target.

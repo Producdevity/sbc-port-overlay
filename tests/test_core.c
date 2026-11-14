@@ -436,14 +436,68 @@ static void graph_cache(void) {
     assert(spo_layout(640, 480) == SPO_OK);
     *saved = spo->mesh;
     spo->intervals[0]++;
+    spo->graph_serial = UINT64_MAX;
     assert(spo_layout(640, 480) == SPO_OK);
     assert(saved->count == spo->mesh.count);
     assert(!memcmp(saved->vertices, spo->mesh.vertices, saved->count * sizeof(spo_vertex)));
     spo->intervals[0] = 100000000;
+    spo->graph_serial = UINT64_MAX;
     assert(spo_layout(640, 480) == SPO_OK);
     assert(spo->mesh.count == saved->count);
-    assert(memcmp(saved->graph_words, spo->mesh.graph_words, sizeof(saved->graph_words)));
+    assert(memcmp(saved->graph_data, spo->mesh.graph_data, sizeof(saved->graph_data)));
     free(saved);
+}
+static void graph_ring(void) {
+    reset();
+    spo_overlay_settings settings = spo->overlay;
+    settings.items = SPO_BIT(SPO_GRAPH);
+    assert(spo_overlay_set(&settings) == SPO_OK);
+    spo->history_count = spo->history_next = 120;
+    spo->history_serial = 120;
+    for (int i = 0; i < 120; i++)
+        spo->intervals[i] = 16000000;
+    spo->graph_range_at = spo_now();
+    assert(spo_layout(640, 480) == SPO_OK);
+    uint32_t epoch = spo->mesh.graph_epoch, version = spo->mesh.graph_version;
+    uint32_t revision = spo->mesh.revision;
+    uint8_t previous[120][4];
+    memcpy(previous, spo->mesh.graph_data, sizeof(previous));
+    spo->intervals[120] = 25000000;
+    spo->history_count++;
+    spo->history_next++;
+    spo->history_serial++;
+    assert(spo_layout(640, 480) == SPO_OK);
+    assert(spo->mesh.graph_epoch == epoch && spo->mesh.graph_version == version + 1);
+    assert(spo->mesh.graph_head == 1 && spo->mesh.revision == revision);
+    assert(memcmp(previous[0], spo->mesh.graph_data[0], 4));
+    assert(!memcmp(previous + 1, spo->mesh.graph_data + 1, 119 * 4));
+    for (int i = 0; i < 600; i++) {
+        spo->intervals[spo->history_next] = 16000000;
+        spo->history_next = (spo->history_next + 1) % SPO_HISTORY;
+        if (spo->history_count < SPO_HISTORY)
+            spo->history_count++;
+        spo->history_serial++;
+        assert(spo_layout(640, 480) == SPO_OK);
+    }
+    assert(spo->mesh.graph_head == 1 && spo->mesh.graph_epoch == epoch);
+    for (int i = 0; i < 120; i++)
+        assert(!memcmp(previous[i], spo->mesh.graph_data[i], 4));
+    uint32_t newest = spo->mesh.graph_head;
+    spo->intervals[spo->history_next] = UINT64_MAX;
+    spo->history_next = (spo->history_next + 1) % SPO_HISTORY;
+    spo->history_serial++;
+    spo->graph_range_at = spo_now();
+    assert(spo_layout(640, 480) == SPO_OK);
+    assert(spo->mesh.graph_data[newest][0] == 40 && spo->mesh.graph_data[newest][1] == 255);
+    settings.font_scale = 3;
+    assert(spo_overlay_set(&settings) == SPO_OK);
+    assert(spo_layout(640, 480) == SPO_OK);
+    assert(spo->mesh.graph_epoch != epoch && spo->mesh.graph_scale == 3);
+    assert(spo->mesh.graph_data[0][0] > previous[0][0]);
+    spo_reset_timing();
+    assert(spo_layout(640, 480) == SPO_OK && !spo->mesh.graph_count);
+    for (int i = 0; i < 120; i++)
+        assert(!spo->mesh.graph_data[i][0]);
 }
 int main(void) {
     input();
@@ -456,6 +510,7 @@ int main(void) {
     actions();
     timing();
     graph_cache();
+    graph_ring();
     maximal_layout();
     malformed_config();
     spo_shutdown();

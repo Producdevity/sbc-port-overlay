@@ -24,6 +24,19 @@ typedef ptrdiff_t GLsizeiptr, GLintptr;
     X(void, TexParameteri, (GLenum, GLenum, GLint))                                                \
     X(void, TexImage2D,                                                                            \
       (GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *))               \
+    X(void, TexSubImage2D,                                                                         \
+      (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void *))               \
+    X(void, Uniform3f, (GLint, GLfloat, GLfloat, GLfloat))                                         \
+    X(void, GenFramebuffers, (GLsizei, GLuint *))                                                  \
+    X(void, DeleteFramebuffers, (GLsizei, const GLuint *))                                         \
+    X(void, BindFramebuffer, (GLenum, GLuint))                                                     \
+    X(GLenum, CheckFramebufferStatus, (GLenum))                                                    \
+    X(void, FramebufferRenderbuffer, (GLenum, GLenum, GLenum, GLuint))                             \
+    X(void, GenRenderbuffers, (GLsizei, GLuint *))                                                 \
+    X(void, DeleteRenderbuffers, (GLsizei, const GLuint *))                                        \
+    X(void, BindRenderbuffer, (GLenum, GLuint))                                                    \
+    X(void, RenderbufferStorage, (GLenum, GLenum, GLsizei, GLsizei))                               \
+    X(void, Finish, (void))                                                                        \
     X(void, PixelStorei, (GLenum, GLint))                                                          \
     X(void, GenBuffers, (GLsizei, GLuint *))                                                       \
     X(void, DeleteBuffers, (GLsizei, const GLuint *))                                              \
@@ -71,19 +84,18 @@ typedef struct {
     void (*BindBufferRange)(GLenum, GLuint, GLuint, GLintptr, GLsizeiptr);
     GLuint (*GetUniformBlockIndex)(GLuint, const char *);
     void (*UniformBlockBinding)(GLuint, GLuint, GLuint);
-    void (*Uniform4uiv)(GLint, GLsizei, const GLuint *);
-    GLuint program, texture, buffers[3], vao;
-    GLint viewport_uniform, texture_uniform;
-    GLint graph_uniform, graph_scale_uniform, graph_slot_uniform, graph_count_uniform;
-    int graph_slot, graph_count;
-    uint32_t graph_words[32], graph_scale;
-    int es3, sample_mask, slot;
-    uint32_t width, height;
-    uint32_t ubo_stride;
+    GLuint program, texture, buffer, vao;
+    GLint viewport_uniform, texture_uniform, graph_uniform;
+    uint32_t graph_head, graph_count, graph_scale, graph_epoch, graph_version;
+    int es3, sample_mask, unpack_subimage;
+    uint32_t width, height, stride, slot, attribute_slot;
+    uint32_t cached_revision, slot_count[3];
     spo_mesh cached_mesh;
-    GLfloat packed[SPO_QUADS * 12];
-    int cached_slot;
-    uint32_t prefix_count, prefix_version, slot_version[3];
+    uint32_t packed[SPO_QUADS * 4];
+    union {
+        spo_vertex vertices[3][SPO_QUADS * 6];
+        uint32_t quads[3][SPO_QUADS * 4];
+    } uploaded;
 } spo_gl;
 _Static_assert(sizeof(spo_context) + sizeof(spo_gl) < 1024 * 1024, "CPU storage budget");
 #undef DECL
@@ -242,11 +254,13 @@ static void unpack_capture(spo_gl *g, GLint state[5]) {
     /* All multirow uploads have an eight-byte-aligned pitch; the tail is one row. */
     if (g->es3) {
         g->GetIntegerv(0x88ef, &state[1]);
+        if (state[1])
+            g->BindBuffer(0x88ec, 0);
+    }
+    if (g->unpack_subimage) {
         g->GetIntegerv(0x0cf2, &state[2]);
         g->GetIntegerv(0x0cf3, &state[3]);
         g->GetIntegerv(0x0cf4, &state[4]);
-        if (state[1])
-            g->BindBuffer(0x88ec, 0);
         if (state[2])
             g->PixelStorei(0x0cf2, 0);
         if (state[3])
@@ -256,9 +270,9 @@ static void unpack_capture(spo_gl *g, GLint state[5]) {
     }
 }
 static void unpack_restore(spo_gl *g, const GLint state[5]) {
-    if (g->es3) {
-        if (state[1])
-            g->BindBuffer(0x88ec, (GLuint)state[1]);
+    if (g->es3 && state[1])
+        g->BindBuffer(0x88ec, (GLuint)state[1]);
+    if (g->unpack_subimage) {
         if (state[2])
             g->PixelStorei(0x0cf2, state[2]);
         if (state[3])
@@ -273,10 +287,11 @@ static void texture_parameters(spo_gl *g) {
     g->TexParameteri(TEXTURE_2D, 0x2802, 0x812f);
     g->TexParameteri(TEXTURE_2D, 0x2803, 0x812f);
 }
+static int warmup(spo_gl *, gl_state *);
 spo_result spo_backend_init(const spo_atlas *atlas) {
     spo_gl *g = calloc(1, sizeof(*g));
     gl_state state;
-    int major = 2, minor = 0, i, unpack_saved = 0;
+    int major = 2, minor = 0, unpack_saved = 0;
     const char *version, *extensions;
     GLuint vertex = 0, fragment = 0;
     GLint ok = 0, unpack[5] = {0};
@@ -284,9 +299,15 @@ spo_result spo_backend_init(const spo_atlas *atlas) {
         "attribute vec2 p;attribute vec2 uv;attribute vec4 color;uniform vec2 size;varying vec2 "
         "t;varying vec4 c;void "
         "main(){gl_Position=vec4(p.x*2.0/size.x-1.0,1.0-p.y*2.0/size.y,0.0,1.0);t=uv;c=color;}";
-    const char *fs =
-        "precision mediump float;uniform sampler2D atlas;varying vec2 t;varying vec4 c;void "
-        "main(){float a=texture2D(atlas,t).a*c.a;gl_FragColor=vec4(c.rgb*a,a);}";
+    const char *fragment_body =
+        "void main(){vec3 rgb=c.rgb;float a;if(t.x<0.){float column=floor(-t.x-1.);"
+        "if(column<120.-graph.y)discard;"
+        "float slot=mod(column+graph.x,120.);"
+        "vec4 d=SAMPLE(atlas,vec2((slot+.5)/128.,63.5/64.));"
+        "float h=floor(d.r*255.+.5);if(h<=(20.-t.y)*graph.z)discard;"
+        "if(d.g>.5&&t.y<1.)rgb=vec3(240.,242.,244.)/255.;a=c.a;"
+        "}else{a=SAMPLE(atlas,t).a*c.a;}OUTPUT=vec4(rgb*a,a);}";
+    char fragment_source[2048];
     if (!g)
         return SPO_CAPACITY;
     spo->renderer = g;
@@ -312,6 +333,8 @@ spo_result spo_backend_init(const spo_atlas *atlas) {
         snprintf(spo->renderer_name, sizeof(spo->renderer_name), "GLES %d.%d", major, minor);
     g->sample_mask = major > 3 || (major == 3 && minor >= 1);
     extensions = (const char *)g->GetString(0x1f03);
+    g->unpack_subimage = g->es3 || extension(extensions, "GL_EXT_unpack_subimage") ||
+                         strstr(spo->renderer_name, "gl4es") != NULL;
     if (g->es3 || extension(extensions, "GL_OES_vertex_array_object")) {
         const char *suffix = g->es3 ? "" : "OES";
         char name[64];
@@ -337,7 +360,6 @@ spo_result spo_backend_init(const spo_atlas *atlas) {
         EXTRA(BindBufferRange);
         EXTRA(GetUniformBlockIndex);
         EXTRA(UniformBlockBinding);
-        EXTRA(Uniform4uiv);
 #undef EXTRA
     }
     capture(g, &state);
@@ -346,39 +368,35 @@ spo_result spo_backend_init(const spo_atlas *atlas) {
     if (g->GenVertexArrays && !g->vao)
         goto resource_failure;
     if (g->es3) {
-        const char *vertex3 =
-            "#version 300 es\nprecision highp float;precision highp int;"
-            "layout(std140) uniform Mesh {vec4 quads[1023];};uniform vec2 size;"
-            "uniform highp uvec4 graph_data[8];uniform int graph_scale;uniform int "
-            "graph_slot;uniform int graph_count;"
-            "out mediump vec2 t;out lowp vec4 c;"
-            "void main(){int q=gl_VertexID/6;int k=gl_VertexID%6;"
-            "vec2 corner=vec2(k==2||k==4||k==5?1.:0.,k==1||k==2||k==4?1.:0.);vec2 p;"
-            "if(graph_slot>=0&&q>=graph_slot&&q<graph_slot+graph_count){"
-            "int column=(q-graph_slot)%120;int w=column>>2;"
-            "uint b=(graph_data[w>>2][w&3]>>uint((column&3)*8))&255u;"
-            "int n=graph_slot*3;bool cap=q>=graph_slot+120;"
-            "float h=cap?((b&128u)!=0u?float(graph_scale):0.):float(b&127u);"
-            "float top=cap?quads[n].y:quads[n].w-h;"
-            "p=vec2(quads[n].x+float(column)*float(graph_scale),top)+"
-            "corner*vec2(float(graph_scale),h);"
-            "t=vec2(127.5/128.,63.5/64.);c=quads[n+2];"
-            "if(cap)c.rgb=vec3(240.,242.,244.)/255.;"
-            "}else{if(graph_slot>=0&&q>=graph_slot+graph_count)q-=graph_count-1;int n=q*3;"
-            "p=mix(quads[n].xy,quads[n].zw,corner);"
-            "t=mix(quads[n+1].xy,quads[n+1].zw,corner);c=quads[n+2];}"
-            "gl_Position=vec4(p.x*2./size.x-1.,1.-p.y*2./size.y,0.,1.);}";
-        const char *fragment3 =
-            "#version 300 es\nprecision mediump float;uniform sampler2D atlas;"
-            "in mediump vec2 t;in lowp vec4 c;out vec4 output_color;"
-            "void main(){float a=texture(atlas,t).a*c.a;output_color=vec4(c.rgb*a,a);}";
-        /* ES3 cannot query the type of current generic attributes; avoid using them. */
+        const char *vertex3 = "#version 300 es\nprecision highp float;precision highp int;"
+                              "layout(std140) uniform Mesh {uvec4 quads[1024];};uniform vec2 size;"
+                              "out mediump vec2 t;out lowp vec4 c;"
+                              "void main(){uvec4 q=quads[gl_VertexID/6];int k=gl_VertexID%6;"
+                              "vec2 corner=vec2(k==2||k==4||k==5?1.:0.,k==1||k==2||k==4?1.:0.);"
+                              "vec2 a=vec2(q.x&65535u,q.x>>16),b=vec2(q.y&65535u,q.y>>16);"
+                              "vec2 p=mix(a,b,corner);"
+                              "if(q.z==0xffffffffu)t=mix(vec2(-1.,0.),vec2(-121.,20.),corner);"
+                              "else t=mix(vec2(q.z&255u,(q.z>>8)&255u),"
+                              "vec2((q.z>>16)&255u,q.z>>24),corner)/vec2(256.,128.);"
+                              "c=vec4(q.w&255u,(q.w>>8)&255u,(q.w>>16)&255u,q.w>>24)/255.;"
+                              "gl_Position=vec4(p.x*2./size.x-1.,1.-p.y*2./size.y,0.,1.);}";
+        snprintf(
+            fragment_source, sizeof(fragment_source),
+            "#version 300 es\nprecision mediump float;uniform sampler2D atlas;uniform vec3 graph;"
+            "in mediump vec2 t;in lowp vec4 c;out vec4 output_color;\n"
+            "#define SAMPLE texture\n#define OUTPUT output_color\n%s",
+            fragment_body);
+        /* Enabled ES3 arrays can destroy unqueryable typed current attributes. */
         vertex = shader(g, 0x8b31, vertex3);
-        fragment = shader(g, 0x8b30, fragment3);
     } else {
+        snprintf(fragment_source, sizeof(fragment_source),
+                 "precision mediump float;uniform sampler2D atlas;uniform vec3 graph;"
+                 "varying vec2 t;varying vec4 c;\n"
+                 "#define SAMPLE texture2D\n#define OUTPUT gl_FragColor\n%s",
+                 fragment_body);
         vertex = shader(g, 0x8b31, vs);
-        fragment = shader(g, 0x8b30, fs);
     }
+    fragment = shader(g, 0x8b30, fragment_source);
     if (vertex && fragment) {
         g->program = g->CreateProgram();
     }
@@ -399,35 +417,26 @@ spo_result spo_backend_init(const spo_atlas *atlas) {
         goto resource_failure;
     g->viewport_uniform = g->GetUniformLocation(g->program, "size");
     g->texture_uniform = g->GetUniformLocation(g->program, "atlas");
+    g->graph_uniform = g->GetUniformLocation(g->program, "graph");
+    g->cached_revision = UINT32_MAX;
+    g->attribute_slot = UINT32_MAX;
+    g->graph_epoch = UINT32_MAX;
+    g->graph_count = UINT32_MAX;
+    g->stride = (uint32_t)sizeof(spo->mesh.vertices);
     if (g->es3) {
-        g->graph_uniform = g->GetUniformLocation(g->program, "graph_data[0]");
-        g->graph_scale_uniform = g->GetUniformLocation(g->program, "graph_scale");
-        g->graph_slot_uniform = g->GetUniformLocation(g->program, "graph_slot");
-        g->graph_count_uniform = g->GetUniformLocation(g->program, "graph_count");
-        g->graph_slot = -2;
-    }
-    {
-        GLenum target = g->es3 ? 0x8a11 : ARRAY_BUFFER;
-        GLsizeiptr bytes = (GLsizeiptr)sizeof(spo->mesh.vertices);
-        if (g->es3) {
-            GLint alignment = 0;
-            GLuint block = g->GetUniformBlockIndex(g->program, "Mesh");
-            g->GetIntegerv(0x8a34, &alignment);
-            if (alignment <= 0 || alignment > 1048576 || block == 0xffffffffu)
-                goto resource_failure;
-            g->ubo_stride =
-                (16368u + (uint32_t)alignment - 1) / (uint32_t)alignment * (uint32_t)alignment;
-            bytes = (GLsizeiptr)(g->ubo_stride * ((SPO_QUADS + 340) / 341));
-            g->UniformBlockBinding(g->program, block, 0);
-        }
-        g->GenBuffers(3, g->buffers);
-        if (!g->buffers[0] || !g->buffers[1] || !g->buffers[2])
+        GLint alignment = 0;
+        GLuint block = g->GetUniformBlockIndex(g->program, "Mesh");
+        g->GetIntegerv(0x8a34, &alignment);
+        if (alignment <= 0 || alignment > 1048576 || block == 0xffffffffu)
             goto resource_failure;
-        for (i = 0; i < 3; i++) {
-            g->BindBuffer(target, g->buffers[i]);
-            g->BufferData(target, bytes, NULL, 0x88e8);
-        }
+        g->stride = (16384u + (uint32_t)alignment - 1) / (uint32_t)alignment * (uint32_t)alignment;
+        g->UniformBlockBinding(g->program, block, 0);
     }
+    g->GenBuffers(1, &g->buffer);
+    if (!g->buffer)
+        goto resource_failure;
+    g->BindBuffer(g->es3 ? 0x8a11 : ARRAY_BUFFER, g->buffer);
+    g->BufferData(g->es3 ? 0x8a11 : ARRAY_BUFFER, (GLsizeiptr)g->stride * 3, NULL, 0x88e8);
     unpack_capture(g, unpack);
     unpack_saved = 1;
     g->GenTextures(1, &g->texture);
@@ -441,6 +450,8 @@ spo_result spo_backend_init(const spo_atlas *atlas) {
     unpack_saved = 0;
     g->UseProgram(g->program);
     g->Uniform1i(g->texture_uniform, 0);
+    if (!warmup(g, &state))
+        goto resource_failure;
     restore(g, &state);
     return SPO_OK;
 resource_failure:
@@ -463,107 +474,40 @@ void spo_backend_shutdown(void) {
             g->DeleteProgram(g->program);
         if (g->texture)
             g->DeleteTextures(1, &g->texture);
-        if (g->buffers[0] || g->buffers[1] || g->buffers[2])
-            g->DeleteBuffers(3, g->buffers);
+        if (g->buffer)
+            g->DeleteBuffers(1, &g->buffer);
         if (g->vao)
             g->DeleteVertexArrays(1, &g->vao);
     }
     free(g);
     spo->renderer = NULL;
 }
-static int graph_rectangle(spo_mesh *out, const spo_vertex *style, float x, float y, float w,
-                           float h, int cap) {
-    if (h <= 0)
-        return 1;
-    if (out->count + 6 > SPO_QUADS * 6)
-        return 0;
-    spo_vertex a = *style, b, c, d;
-    a.x = x;
-    a.y = y;
-    a.u = 127.5f / 128.0f;
-    a.v = 63.5f / 64.0f;
-    if (cap) {
-        a.color[0] = 240;
-        a.color[1] = 242;
-        a.color[2] = 244;
-    }
-    b = a;
-    b.y += h;
-    c = b;
-    c.x += w;
-    d = a;
-    d.x += w;
-    spo_vertex *vertices = out->vertices + out->count;
-    vertices[0] = a;
-    vertices[1] = b;
-    vertices[2] = c;
-    vertices[3] = a;
-    vertices[4] = c;
-    vertices[5] = d;
-    out->count += 6;
-    return 1;
-}
-static int expand_graph(const spo_mesh *mesh, spo_mesh *out) {
-    out->count = 0;
-    for (uint32_t first = 0; first < mesh->count; first += 6) {
-        const spo_vertex *quad = mesh->vertices + first;
-        if (quad->u >= 0) {
-            if (out->count + 6 > SPO_QUADS * 6)
-                return 0;
-            memcpy(out->vertices + out->count, quad, 6 * sizeof(spo_vertex));
-            out->count += 6;
-        } else {
-            for (uint32_t column = 0; column < 120; column++) {
-                uint32_t value = (mesh->graph_words[column / 4] >> ((column % 4) * 8)) & 255;
-                float height = (float)(value & 127), scale = (float)mesh->graph_scale;
-                float x = quad->x + (float)column * scale;
-                if (!graph_rectangle(out, quad, x, quad[2].y - height, scale, height, 0))
-                    return 0;
-                if ((value & 128) && !graph_rectangle(out, quad, x, quad->y, scale, scale, 1))
-                    return 0;
-            }
-        }
-    }
-    return 1;
-}
-spo_result spo_backend_draw(const spo_mesh *mesh, uint32_t prefix, uint32_t width, uint32_t height,
-                            uint32_t *draws) {
-    spo_gl *g = spo->renderer;
-    gl_state state;
-    int i, n;
-    if (!g)
-        return SPO_GL_UNAVAILABLE;
-    if (!g->es3 && mesh->graph_scale) {
-        if (!expand_graph(mesh, &g->cached_mesh))
-            return SPO_CAPACITY;
-        mesh = &g->cached_mesh;
-    }
-    capture(g, &state);
-    n = g->sample_mask ? 9 : g->es3 ? 8 : 7;
+static void prepare(spo_gl *g, gl_state *state, uint32_t width, uint32_t height) {
+    int i, n = g->sample_mask ? 9 : g->es3 ? 8 : 7;
     for (i = 0; i < n; i++)
-        if (state.enabled[i] != (i == 0)) {
-            state.enables_changed |= 1 << i;
+        if (state->enabled[i] != (i == 0)) {
+            state->enables_changed |= 1 << i;
             if (i == 0)
                 g->Enable(enables[i]);
             else
                 g->Disable(enables[i]);
         }
-    if (state.eq_rgb != 0x8006 || state.eq_alpha != 0x8006) {
-        state.equation_changed = 1;
+    if (state->eq_rgb != 0x8006 || state->eq_alpha != 0x8006) {
+        state->equation_changed = 1;
         g->BlendEquationSeparate(0x8006, 0x8006);
     }
-    if (state.src_rgb != 1 || state.src_alpha != 1 || state.dst_rgb != 0x0303 ||
-        state.dst_alpha != 0x0303) {
-        state.function_changed = 1;
+    if (state->src_rgb != 1 || state->src_alpha != 1 || state->dst_rgb != 0x0303 ||
+        state->dst_alpha != 0x0303) {
+        state->function_changed = 1;
         g->BlendFuncSeparate(1, 0x0303, 1, 0x0303);
     }
-    if (state.viewport[0] || state.viewport[1] || state.viewport[2] != (GLint)width ||
-        state.viewport[3] != (GLint)height) {
-        state.viewport_changed = 1;
+    if (state->viewport[0] || state->viewport[1] || state->viewport[2] != (GLint)width ||
+        state->viewport[3] != (GLint)height) {
+        state->viewport_changed = 1;
         g->Viewport(0, 0, (GLsizei)width, (GLsizei)height);
     }
-    if (!state.color[0] || !state.color[1] || !state.color[2] || !state.color[3]) {
-        state.color_changed = 1;
+    if (!state->color[0] || !state->color[1] || !state->color[2] || !state->color[3]) {
+        state->color_changed = 1;
         g->ColorMask(1, 1, 1, 1);
     }
     g->UseProgram(g->program);
@@ -573,119 +517,183 @@ spo_result spo_backend_draw(const spo_mesh *mesh, uint32_t prefix, uint32_t widt
         g->height = height;
     }
     g->BindTexture(TEXTURE_2D, g->texture);
-    if (g->es3 && state.sampler)
+    if (g->es3 && state->sampler)
         g->BindSampler(0, 0);
     if (g->BindVertexArray)
         g->BindVertexArray(g->vao);
-    if (g->es3) {
-        uint32_t first, j, batch = 0;
-        int graph_count = 120;
-        if (mesh->graph_scale) {
-            for (j = 0; j < 30; j++)
-                if (mesh->graph_words[j] & UINT32_C(0x80808080))
-                    graph_count = 240;
-            if (g->graph_count != graph_count) {
-                g->Uniform1i(g->graph_count_uniform, graph_count);
-                g->graph_count = graph_count;
-            }
-            if (memcmp(g->graph_words, mesh->graph_words, sizeof(g->graph_words))) {
-                memcpy(g->graph_words, mesh->graph_words, sizeof(g->graph_words));
-                g->Uniform4uiv(g->graph_uniform, 8, mesh->graph_words);
-            }
-            if (g->graph_scale != mesh->graph_scale) {
-                g->graph_scale = mesh->graph_scale;
-                g->Uniform1i(g->graph_scale_uniform, (GLint)mesh->graph_scale);
-            }
-        }
-        int prefix_changed =
-            prefix != g->prefix_count ||
-            memcmp(mesh->vertices, g->cached_mesh.vertices, prefix * sizeof(spo_vertex));
-        int changed = prefix_changed || mesh->count != g->cached_mesh.count ||
-                      memcmp(mesh->vertices + prefix, g->cached_mesh.vertices + prefix,
-                             (mesh->count - prefix) * sizeof(spo_vertex));
-        if (prefix_changed) {
-            g->prefix_count = prefix;
-            g->prefix_version++;
-        }
-        int slot = changed ? g->slot : g->cached_slot;
-        if (changed) {
-            for (j = 0; j < mesh->count / 6; j++) {
-                const spo_vertex *a = mesh->vertices + j * 6, *b = a + 2;
-                if (j * 6 < g->cached_mesh.count &&
-                    !memcmp(a, g->cached_mesh.vertices + j * 6, sizeof(*a)) &&
-                    !memcmp(b, g->cached_mesh.vertices + j * 6 + 2, sizeof(*b)))
-                    continue;
-                GLfloat *out = g->packed + j * 12;
-                out[0] = a->x;
-                out[1] = a->y;
-                out[2] = b->x;
-                out[3] = b->y;
-                out[4] = a->u;
-                out[5] = a->v;
-                out[6] = b->u;
-                out[7] = b->v;
-                for (int channel = 0; channel < 4; channel++)
-                    out[8 + channel] = (float)a->color[channel] / 255.0f;
-            }
-            g->cached_mesh.count = mesh->count;
-            uint32_t copy_from = prefix_changed ? 0 : prefix;
-            memcpy(g->cached_mesh.vertices + copy_from, mesh->vertices + copy_from,
-                   (mesh->count - copy_from) * sizeof(spo_vertex));
-            g->cached_slot = slot;
-            g->BindBuffer(0x8a11, g->buffers[slot]);
-        }
-        for (first = 0; first < mesh->count; first += 341 * 6, batch++) {
-            uint32_t quads = (mesh->count - first) / 6;
-            if (quads > 341)
-                quads = 341;
-            uint32_t upload_first = 0;
-            if (g->slot_version[slot] == g->prefix_version && prefix > first) {
-                upload_first = (prefix - first) / 6;
-                if (upload_first > quads)
-                    upload_first = quads;
-            }
-            if (changed && upload_first < quads)
-                g->BufferSubData(0x8a11, (GLintptr)(batch * g->ubo_stride + upload_first * 48),
-                                 (GLsizeiptr)((quads - upload_first) * 48),
-                                 g->packed + (first / 6 + upload_first) * 12);
-            g->BindBufferRange(0x8a11, 0, g->buffers[slot], (GLintptr)(batch * g->ubo_stride),
-                               16368);
-            int graph_slot = -1;
-            if (mesh->graph_scale)
-                for (j = 0; j < quads; j++)
-                    if (mesh->vertices[first + j * 6].u < 0) {
-                        graph_slot = (int)j;
-                        break;
-                    }
-            if (g->graph_slot != graph_slot) {
-                g->Uniform1i(g->graph_slot_uniform, graph_slot);
-                g->graph_slot = graph_slot;
-            }
-            g->DrawArrays(0x0004, 0,
-                          (GLsizei)((quads + (graph_slot >= 0 ? graph_count - 1 : 0)) * 6));
-            (*draws)++;
-        }
-        if (changed)
+}
+static uint32_t pair(float a, float b) {
+    return (uint32_t)a | ((uint32_t)b << 16);
+}
+static void pack_mesh(spo_gl *g, const spo_mesh *mesh) {
+    for (uint32_t i = 0; i < mesh->count; i += 6) {
+        const spo_vertex *a = mesh->vertices + i, *b = a + 2;
+        if (i < g->cached_mesh.count && !memcmp(a, g->cached_mesh.vertices + i, sizeof(*a)) &&
+            !memcmp(b, g->cached_mesh.vertices + i + 2, sizeof(*b)))
+            continue;
+        uint32_t *out = g->packed + i / 6 * 4;
+        out[0] = pair(a->x, a->y);
+        out[1] = pair(b->x, b->y);
+        out[2] = a->u < 0 ? UINT32_MAX
+                          : (uint32_t)(a->u * 256) | ((uint32_t)(a->v * 128) << 8) |
+                                ((uint32_t)(b->u * 256) << 16) | ((uint32_t)(b->v * 128) << 24);
+        out[3] = (uint32_t)a->color[0] | ((uint32_t)a->color[1] << 8) |
+                 ((uint32_t)a->color[2] << 16) | ((uint32_t)a->color[3] << 24);
+    }
+}
+static void upload_mesh(spo_gl *g, const spo_mesh *mesh) {
+    if (mesh->revision != g->cached_revision || mesh->count != g->cached_mesh.count) {
+        if (mesh->count != g->cached_mesh.count ||
+            memcmp(mesh->vertices, g->cached_mesh.vertices, mesh->count * sizeof(spo_vertex))) {
             g->slot = (g->slot + 1) % 3;
-        g->slot_version[slot] = g->prefix_version;
-    } else {
-        g->BindBuffer(ARRAY_BUFFER, g->buffers[g->slot]);
-        g->slot = (g->slot + 1) % 3;
-        g->BufferSubData(ARRAY_BUFFER, 0, (GLsizeiptr)(mesh->count * sizeof(spo_vertex)),
-                         mesh->vertices);
+            uint32_t unit = g->es3 ? 16 : 6 * sizeof(spo_vertex), count = mesh->count / 6;
+            if (g->es3)
+                pack_mesh(g, mesh);
+            const uint8_t *data =
+                g->es3 ? (const uint8_t *)g->packed : (const uint8_t *)mesh->vertices;
+            uint8_t *old = g->es3 ? (uint8_t *)g->uploaded.quads[g->slot]
+                                  : (uint8_t *)g->uploaded.vertices[g->slot];
+            uint32_t first = 0, end = count;
+            while (first < count && first < g->slot_count[g->slot] &&
+                   !memcmp(data + first * unit, old + first * unit, unit))
+                first++;
+            while (end > first && end <= g->slot_count[g->slot] &&
+                   !memcmp(data + (end - 1) * unit, old + (end - 1) * unit, unit))
+                end--;
+            if (first < end) {
+                GLenum target = g->es3 ? 0x8a11 : ARRAY_BUFFER;
+                g->BindBuffer(target, g->buffer);
+                g->BufferSubData(target, (GLintptr)g->slot * g->stride + first * unit,
+                                 (GLsizeiptr)(end - first) * unit, data + first * unit);
+                memcpy(old + first * unit, data + first * unit, (end - first) * unit);
+            }
+            g->slot_count[g->slot] = count;
+            memcpy(g->cached_mesh.vertices, mesh->vertices, mesh->count * sizeof(spo_vertex));
+            g->cached_mesh.count = mesh->count;
+        }
+        g->cached_revision = mesh->revision;
+    }
+    if (g->es3) {
+        g->BindBufferRange(0x8a11, 0, g->buffer, (GLintptr)g->slot * g->stride, 16384);
+    } else if (!g->BindVertexArray || g->attribute_slot != g->slot) {
+        g->BindBuffer(ARRAY_BUFFER, g->buffer);
+        uintptr_t base = (uintptr_t)g->slot * g->stride;
         g->VertexAttribPointer(0, 2, 0x1406, 0, sizeof(spo_vertex),
-                               (const void *)(uintptr_t)offsetof(spo_vertex, x));
+                               (void *)(base + offsetof(spo_vertex, x)));
         g->VertexAttribPointer(1, 2, 0x1406, 0, sizeof(spo_vertex),
-                               (const void *)(uintptr_t)offsetof(spo_vertex, u));
+                               (void *)(base + offsetof(spo_vertex, u)));
         g->VertexAttribPointer(2, 4, 0x1401, 1, sizeof(spo_vertex),
-                               (const void *)(uintptr_t)offsetof(spo_vertex, color));
-        for (i = 0; i < 3; i++)
+                               (void *)(base + offsetof(spo_vertex, color)));
+        for (int i = 0; i < 3; i++)
             g->EnableVertexAttribArray((GLuint)i);
+        g->attribute_slot = g->slot;
     }
-    if (!g->es3) {
-        g->DrawArrays(0x0004, 0, (GLsizei)mesh->count);
-        *draws = 1;
+}
+static void upload_graph(spo_gl *g, const spo_mesh *mesh) {
+    if (!mesh->graph_scale)
+        return;
+    if (g->graph_epoch != mesh->graph_epoch || g->graph_version != mesh->graph_version) {
+        GLint unpack[5] = {0};
+        int single = g->graph_epoch == mesh->graph_epoch &&
+                     mesh->graph_version == g->graph_version + 1 &&
+                     mesh->graph_head == (g->graph_head + 1) % 120;
+        uint32_t first = single ? (mesh->graph_head + 119) % 120 : 0;
+        unpack_capture(g, unpack);
+        g->TexSubImage2D(TEXTURE_2D, 0, (GLint)first, 63, single ? 1 : 120, 1, 0x1908, 0x1401,
+                         mesh->graph_data[first]);
+        unpack_restore(g, unpack);
+        g->graph_epoch = mesh->graph_epoch;
+        g->graph_version = mesh->graph_version;
     }
+    if (g->graph_head != mesh->graph_head || g->graph_count != mesh->graph_count ||
+        g->graph_scale != mesh->graph_scale) {
+        g->Uniform3f(g->graph_uniform, (float)mesh->graph_head, (float)mesh->graph_count,
+                     (float)mesh->graph_scale);
+        g->graph_head = mesh->graph_head;
+        g->graph_count = mesh->graph_count;
+        g->graph_scale = mesh->graph_scale;
+    }
+}
+static int warmup(spo_gl *g, gl_state *state) {
+    GLint draw = 0, read = 0, renderbuffer = 0;
+    GLuint framebuffer = 0, color = 0;
+    int ok = 0;
+    g->GetIntegerv(0x8ca6, &draw);
+    if (g->es3)
+        g->GetIntegerv(0x8caa, &read);
+    else
+        read = draw;
+    g->GetIntegerv(0x8ca7, &renderbuffer);
+    g->GenFramebuffers(1, &framebuffer);
+    g->GenRenderbuffers(1, &color);
+    if (!framebuffer || !color)
+        goto done;
+    g->BindFramebuffer(0x8d40, framebuffer);
+    g->BindRenderbuffer(0x8d41, color);
+    g->RenderbufferStorage(0x8d41, g->es3 ? 0x8058 : 0x8056, 1, 1);
+    g->FramebufferRenderbuffer(0x8d40, 0x8ce0, 0x8d41, color);
+    if (g->CheckFramebufferStatus(0x8d40) != 0x8cd5)
+        goto done;
+    prepare(g, state, 1, 1);
+    g->Uniform3f(g->graph_uniform, 0, 120, 1);
+    if (g->es3) {
+        const uint32_t quads[8] = {0, 0x00010001, 0x7fff7fff, UINT32_MAX,
+                                   0, 0x00010001, UINT32_MAX, UINT32_MAX};
+        g->BindBuffer(0x8a11, g->buffer);
+        g->BufferSubData(0x8a11, 0, sizeof(quads), quads);
+        g->BindBufferRange(0x8a11, 0, g->buffer, 0, 16384);
+    } else {
+        spo_vertex vertices[12];
+        static const float corners[6][2] = {{0, 0}, {0, 1}, {1, 1}, {0, 0}, {1, 1}, {1, 0}};
+        for (int i = 0; i < 12; i++) {
+            float x = corners[i % 6][0], y = corners[i % 6][1];
+            vertices[i] = (spo_vertex){x,
+                                       y,
+                                       i < 6 ? 127.5f / 128.0f : -1 - x * 120,
+                                       i < 6 ? 63.5f / 64.0f : y * 20,
+                                       {255, 255, 255, 255}};
+        }
+        g->BindBuffer(ARRAY_BUFFER, g->buffer);
+        g->BufferSubData(ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+        g->VertexAttribPointer(0, 2, 0x1406, 0, sizeof(spo_vertex),
+                               (void *)offsetof(spo_vertex, x));
+        g->VertexAttribPointer(1, 2, 0x1406, 0, sizeof(spo_vertex),
+                               (void *)offsetof(spo_vertex, u));
+        g->VertexAttribPointer(2, 4, 0x1401, 1, sizeof(spo_vertex),
+                               (void *)offsetof(spo_vertex, color));
+        for (int i = 0; i < 3; i++)
+            g->EnableVertexAttribArray((GLuint)i);
+        g->attribute_slot = 0;
+    }
+    g->DrawArrays(0x0004, 0, 12);
+    g->Finish();
+    ok = 1;
+done:
+    if (g->es3) {
+        g->BindFramebuffer(0x8ca9, (GLuint)draw);
+        g->BindFramebuffer(0x8ca8, (GLuint)read);
+    } else
+        g->BindFramebuffer(0x8d40, (GLuint)draw);
+    g->BindRenderbuffer(0x8d41, (GLuint)renderbuffer);
+    if (framebuffer)
+        g->DeleteFramebuffers(1, &framebuffer);
+    if (color)
+        g->DeleteRenderbuffers(1, &color);
+    return ok;
+}
+spo_result spo_backend_draw(const spo_mesh *mesh, uint32_t width, uint32_t height, uint32_t *draws) {
+    spo_gl *g = spo->renderer;
+    gl_state state;
+    if (!g)
+        return SPO_GL_UNAVAILABLE;
+    if (mesh->count > SPO_QUADS * 6 || mesh->count % 6)
+        return SPO_CAPACITY;
+    capture(g, &state);
+    prepare(g, &state, width, height);
+    upload_mesh(g, mesh);
+    upload_graph(g, mesh);
+    g->DrawArrays(0x0004, 0, (GLsizei)mesh->count);
+    *draws = 1;
     restore(g, &state);
     return SPO_OK;
 }

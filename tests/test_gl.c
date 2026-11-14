@@ -9,6 +9,50 @@
 #include <stdlib.h>
 #include <string.h>
 static int no_vao, es3, fail_mode;
+static int rendering, draw_calls, upload_calls, texture_calls, texture_width;
+static size_t upload_bytes;
+static void draw_arrays(GLenum mode, GLint first, GLsizei count) {
+    if (rendering)
+        draw_calls++;
+    glDrawArrays(mode, first, count);
+}
+static void buffer_subdata(GLenum target, GLintptr offset, GLsizeiptr size, const void *data) {
+    if (rendering) {
+        upload_calls++;
+        upload_bytes += (size_t)size;
+    }
+    glBufferSubData(target, offset, size, data);
+}
+static void texture_subimage(GLenum target, GLint level, GLint x, GLint y, GLsizei w, GLsizei h,
+                             GLenum format, GLenum type, const void *data) {
+    if (rendering) {
+        texture_calls++;
+        texture_width = w;
+        assert(y == 63 && h == 1);
+    }
+    glTexSubImage2D(target, level, x, y, w, h, format, type, data);
+}
+static void buffer_data(GLenum target, GLsizeiptr size, const void *data, GLenum usage) {
+    assert(!rendering);
+    glBufferData(target, size, data, usage);
+}
+static void finish(void) {
+    assert(!rendering);
+    glFinish();
+}
+static spo_result frame(uint32_t width, uint32_t height) {
+    rendering = 1;
+    draw_calls = upload_calls = texture_calls = texture_width = 0;
+    upload_bytes = 0;
+    spo_result result = spo_frame(width, height);
+    rendering = 0;
+    assert(draw_calls <= 1);
+    return result;
+}
+static GLenum fail_framebuffer(GLenum target) {
+    (void)target;
+    return GL_FRAMEBUFFER_UNSUPPORTED;
+}
 static GLuint fail_shader(GLenum type) {
     (void)type;
     return 0;
@@ -31,6 +75,11 @@ static void *resolve(const char *name, void *user) {
         memcpy(&out, &fn, sizeof(out));
         return out;
     }
+    if (fail_mode == 3 && !strcmp(name, "glCheckFramebufferStatus")) {
+        GLenum (*fn)(GLenum) = fail_framebuffer;
+        memcpy(&out, &fn, sizeof(out));
+        return out;
+    }
     if (!strcmp(name, "glGetString")) {
         const GLubyte *(*fn)(GLenum) = get_string;
         memcpy(&out, &fn, sizeof(out));
@@ -41,6 +90,18 @@ static void *resolve(const char *name, void *user) {
         memcpy(&out, &fn, sizeof(out));
         return out;
     }
+#define INTERCEPT(symbol, function)                                                                \
+    if (!strcmp(name, symbol)) {                                                                   \
+        __typeof__(&function) fn = &function;                                                      \
+        memcpy(&out, &fn, sizeof(out));                                                            \
+        return out;                                                                                \
+    }
+    INTERCEPT("glDrawArrays", draw_arrays)
+    INTERCEPT("glBufferSubData", buffer_subdata)
+    INTERCEPT("glTexSubImage2D", texture_subimage)
+    INTERCEPT("glBufferData", buffer_data)
+    INTERCEPT("glFinish", finish)
+#undef INTERCEPT
     proc = eglGetProcAddress(name);
     memcpy(&out, &proc, sizeof(out));
     return out;
@@ -131,9 +192,9 @@ static void take(audit *a) {
             glGetVertexAttribfv((GLuint)i, GL_CURRENT_VERTEX_ATTRIB, &a->current[i * 4]);
     }
     if (es3) {
-        static const GLenum extra[] = {GL_VERTEX_ARRAY_BINDING, GL_PIXEL_UNPACK_BUFFER_BINDING,
-                                       GL_UNPACK_ROW_LENGTH, GL_UNPACK_SKIP_ROWS,
-                                       GL_UNPACK_SKIP_PIXELS};
+        static const GLenum extra[] = {
+            GL_READ_FRAMEBUFFER_BINDING, GL_VERTEX_ARRAY_BINDING, GL_PIXEL_UNPACK_BUFFER_BINDING,
+            GL_UNPACK_ROW_LENGTH,        GL_UNPACK_SKIP_ROWS,     GL_UNPACK_SKIP_PIXELS};
         for (i = 0; i < sizeof(extra) / sizeof(extra[0]); i++)
             glGetIntegerv(extra[i], &a->values[a->count++]);
         a->values[a->count++] = glIsEnabled(GL_RASTERIZER_DISCARD);
@@ -293,6 +354,7 @@ int main(int argc, char **argv) {
         glPixelStorei(GL_UNPACK_SKIP_ROWS, 2);
         glPixelStorei(GL_UNPACK_SKIP_PIXELS, 3);
         glEnable(GL_RASTERIZER_DISCARD);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     }
     assert(glGetError() == GL_NO_ERROR);
     take(&before);
@@ -300,7 +362,7 @@ int main(int argc, char **argv) {
     config.abi_version = SPO_ABI_VERSION;
     config.get_proc_address = resolve;
     config.port_name = "GL isolation test";
-    for (fail_mode = 1; fail_mode <= 2; fail_mode++) {
+    for (fail_mode = 1; fail_mode <= 3; fail_mode++) {
         assert(spo_init(&config) == SPO_GL_UNAVAILABLE);
         take(&after);
         assert(!memcmp(&before, &after, sizeof(audit)));
@@ -326,27 +388,28 @@ int main(int argc, char **argv) {
     o.items = 1u << SPO_FPS;
     assert(spo_overlay_set(&o) == SPO_OK);
     for (i = 0; i < 4; i++) {
-        assert(spo_frame(640, 480) == SPO_OK);
+        assert(frame(640, 480) == SPO_OK);
         take(&after);
         assert(!memcmp(&before, &after, sizeof(audit)));
     }
     if (es3) {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, fb);
         glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo[0]);
         glBindBuffer(GL_UNIFORM_BUFFER, ubo[1]);
         take(&before);
         assert(before.ubo_range[0] == 0 && before.ubo_range[1] == 0);
-        assert(spo_frame(640, 480) == SPO_OK);
+        assert(frame(640, 480) == SPO_OK);
         take(&after);
         assert(!memcmp(&before, &after, sizeof(audit)));
     }
     spo_reset_timing();
-    assert(spo_frame(640, 480) == SPO_OK);
+    assert(frame(640, 480) == SPO_OK);
     {
         spo_stats stats = {0};
         stats.struct_size = sizeof(stats);
         assert(spo_get_stats(&stats) == SPO_OK);
         assert(stats.vertices > 341 * 6);
-        assert(stats.draw_calls == (es3 ? (stats.vertices + 2045) / 2046 : 1));
+        assert(stats.draw_calls == 1);
     }
     {
         int x, y;
@@ -369,6 +432,9 @@ int main(int argc, char **argv) {
                     assert(pixel[0] < 130 && pixel[1] < 130 && pixel[2] < 130);
             }
     }
+    assert(frame(640, 480) == SPO_OK);
+    assert(draw_calls == 1 && upload_calls == 0);
+    assert(texture_calls == 0);
     glReadPixels(10, 469, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
     assert(glGetError() == GL_NO_ERROR);
     assert(pixel[0] < 110 && pixel[1] < 110 && pixel[2] < 110 && pixel[3] > 200);
@@ -382,7 +448,7 @@ int main(int argc, char **argv) {
     for (i = 0; i < 120; i++)
         spo->intervals[i] = 16666000;
     spo->graph_range_at = spo_now();
-    assert(spo_frame(640, 480) == SPO_OK);
+    assert(frame(640, 480) == SPO_OK);
     take(&after);
     assert(!memcmp(&before, &after, sizeof(audit)));
     glReadPixels(135, 480 - 44 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
@@ -390,14 +456,18 @@ int main(int argc, char **argv) {
     glReadPixels(135, 480 - 20 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
     assert(pixel[0] < 130 && pixel[1] < 130);
     spo->intervals[60] = 100000000;
+    spo->graph_serial = UINT64_MAX;
     spo->last_stamp = 0;
-    assert(spo_frame(640, 480) == SPO_OK);
+    assert(frame(640, 480) == SPO_OK);
     glReadPixels(135, 480 - 15 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
     assert(pixel[0] > 180 && pixel[1] > 180 && pixel[2] > 180);
+    assert(frame(640, 480) == SPO_OK);
+    assert(draw_calls == 1 && upload_calls == 0);
+    assert(texture_calls == 1 && texture_width == 1);
     assert(glGetError() == GL_NO_ERROR);
     assert(spo_preset_set(0) == SPO_OK);
     take(&before);
-    assert(spo_frame(640, 480) == SPO_OK);
+    assert(frame(640, 480) == SPO_OK);
     take(&after);
     assert(!memcmp(&before, &after, sizeof(audit)));
     o.struct_size = sizeof(o);
@@ -405,7 +475,7 @@ int main(int argc, char **argv) {
     o.font_scale = 4;
     o.items = 1u << SPO_FPS;
     assert(spo_overlay_set(&o) == SPO_OK);
-    assert(spo_frame(640, 480) == SPO_OK);
+    assert(frame(640, 480) == SPO_OK);
     spo_shutdown();
     take(&after);
     assert(!memcmp(&before, &after, sizeof(audit)));

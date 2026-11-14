@@ -94,6 +94,7 @@ spo_result spo_init(const spo_config *c) {
     spo_text_copy(spo->renderer_name, sizeof(spo->renderer_name), "Headless");
     spo->cursor = -1;
     spo->graph_max = 33.333333;
+    spo->graph_serial = UINT64_MAX;
     spo->overlay =
         (spo_overlay_settings){sizeof(spo_overlay_settings), 0, 0, 0, 2, 65, 100, 120, 0};
     spo->stats.struct_size = sizeof(spo_stats);
@@ -144,7 +145,9 @@ void spo_reset_timing(void) {
     spo->last_stamp = spo->window_ns = spo->refresh_stamp = 0;
     spo->history_count = spo->history_next = spo->window_frames = 0;
     spo->fps = spo->frame_ms = spo->low_1 = 0;
-    spo->formatted_at = spo->mesh_formatted_at = 0;
+    spo->formatted_at = spo->mesh_formatted_at = spo->format_checked_at = 0;
+    spo->history_serial = 0;
+    spo->graph_serial = UINT64_MAX;
     spo->graph_max = 33.333333;
     spo->graph_range_at = spo->graph_high_at = 0;
     spo_metrics_reset();
@@ -443,6 +446,7 @@ spo_result spo_frame(uint32_t width, uint32_t height) {
     spo->frame_reads = 0;
     if (spo->last_stamp && now > spo->last_stamp) {
         uint64_t dt = now - spo->last_stamp;
+        spo->history_serial++;
         spo->intervals[spo->history_next] = dt;
         spo->history_next = (spo->history_next + 1) % SPO_HISTORY;
         if (spo->history_count < SPO_HISTORY)
@@ -458,8 +462,7 @@ spo_result spo_frame(uint32_t width, uint32_t height) {
     if (spo->overlay.items || spo->counter_mask || spo->indicator_mask || spo->open) {
         result = spo_layout(width, height);
         if (result == SPO_OK && spo->mesh.count && !(spo->config.flags & SPO_INIT_NO_RENDER))
-            result = spo_backend_draw(&spo->mesh, spo->open ? 0 : spo->base_count, width, height,
-                                      &draws);
+            result = spo_backend_draw(&spo->mesh, width, height, &draws);
     } else
         spo->mesh.count = 0;
     end = spo_cpu_now();

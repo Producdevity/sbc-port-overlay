@@ -6,7 +6,7 @@
 #include <stdint.h>
 #define SPO_BIT(i) (UINT32_C(1) << (i))
 #define SPO_HISTORY 512
-#define SPO_QUADS 2048
+#define SPO_QUADS 1024
 #define SPO_FDS 24
 #define SPO_INI_ENTRIES 256
 typedef struct {
@@ -18,8 +18,9 @@ typedef struct {
 } spo_rect;
 typedef struct {
     spo_vertex vertices[SPO_QUADS * 6];
-    uint32_t count;
-    uint32_t graph_words[32], graph_scale;
+    uint32_t count, revision;
+    uint8_t graph_data[120][4];
+    uint32_t graph_head, graph_count, graph_scale, graph_epoch, graph_version;
 } spo_mesh;
 typedef struct {
     const uint8_t *rgba;
@@ -77,7 +78,7 @@ typedef struct {
     spo_result error;
     spo_pad pads[4];
     int open, drain, root, detail, cursor, editing;
-    uint64_t intervals[SPO_HISTORY], last_stamp, window_ns, refresh_stamp;
+    uint64_t intervals[SPO_HISTORY], last_stamp, window_ns, refresh_stamp, history_serial;
     uint32_t history_count, history_next, window_frames;
     double fps, frame_ms, low_1, graph_max;
     uint64_t graph_high_at;
@@ -101,13 +102,12 @@ typedef struct {
     char lines[40][64];
     uint32_t line_count, header_lines, formatted_valid;
     uint64_t graph_range_at;
-    uint64_t graph_ns[SPO_HISTORY];
-    uint8_t graph_pixels[SPO_HISTORY];
+    uint64_t graph_serial;
     double graph_pixel_range, graph_pixel_factor;
     int graph_pixel_scale;
     double graph_label_range;
     char graph_label[32];
-    uint64_t formatted_at;
+    uint64_t formatted_at, format_checked_at;
     spo_overlay_settings formatted_settings;
     uint32_t formatted_counters, formatted_indicators;
     spo_stats stats;
@@ -151,6 +151,6 @@ spo_rect spo_anchor(uint32_t, uint32_t, int, int, int);
 void spo_font_atlas(uint8_t *);
 spo_result spo_backend_init(const spo_atlas *);
 void spo_backend_shutdown(void);
-spo_result spo_backend_draw(const spo_mesh *, uint32_t, uint32_t, uint32_t, uint32_t *);
+spo_result spo_backend_draw(const spo_mesh *, uint32_t, uint32_t, uint32_t *);
 const char *spo_item_name(uint32_t);
 #endif

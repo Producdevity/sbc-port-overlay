@@ -124,7 +124,9 @@ static void part(char *row, const char *format, ...) {
 }
 static void formatted(uint64_t now) {
     char row[64] = "", buf[64];
-    uint32_t i;
+    uint32_t i, previous_count = spo->line_count, previous_header = spo->header_lines;
+    char previous[40][64];
+    memcpy(previous, spo->lines, sizeof(previous));
     spo->line_count = 0;
     if (spo->overlay.items & SPO_BIT(SPO_FPS)) {
         if (spo->fps > 0)
@@ -199,7 +201,12 @@ static void formatted(uint64_t now) {
             line("SELF --us %u draw%s", spo->stats.draw_calls,
                  spo->stats.draw_calls == 1 ? "" : "s");
     }
-    spo->formatted_at = now;
+    if (!spo->formatted_at || previous_count != spo->line_count ||
+        previous_header != spo->header_lines ||
+        memcmp(previous, spo->lines, spo->line_count * sizeof(spo->lines[0])) ||
+        memcmp(&spo->formatted_settings, &spo->overlay, sizeof(spo->overlay)))
+        spo->formatted_at = now;
+    spo->format_checked_at = now;
     spo->formatted_settings = spo->overlay;
     spo->formatted_counters = spo->counter_mask;
     spo->formatted_indicators = spo->indicator_mask;
@@ -385,12 +392,13 @@ spo_result spo_layout(uint32_t width, uint32_t height) {
     spo->mesh.graph_scale = 0;
     if (spo->open) {
         spo->mesh_formatted_at = 0;
+        spo->mesh.revision++;
         return menu(width, height);
     }
     for (i = 0; i < SPO_ITEM_COUNT; i++)
         if (spo->metrics[i].valid)
             valid |= SPO_BIT(i);
-    if (!spo->formatted_at || now - spo->formatted_at >= UINT64_C(500000000) ||
+    if (!spo->formatted_at || now - spo->format_checked_at >= UINT64_C(500000000) ||
         memcmp(&spo->formatted_settings, &spo->overlay, sizeof(spo->overlay)) ||
         spo->counter_mask != spo->formatted_counters ||
         spo->indicator_mask != spo->formatted_indicators || valid != spo->formatted_valid) {
@@ -411,6 +419,7 @@ spo_result spo_layout(uint32_t width, uint32_t height) {
         graph_y = spo->cached_graph_y;
         goto draw_graph;
     }
+    spo->mesh.revision++;
     for (i = 0; i < spo->line_count; i++) {
         int n = (int)strlen(spo->lines[i]) * 5;
         if (n > base_w)
@@ -470,36 +479,41 @@ draw_graph:
                 spo->graph_max = peak;
             spo->graph_range_at = now;
         }
-        if (spo->graph_pixel_range != spo->graph_max || spo->graph_pixel_scale != scale) {
-            memset(spo->graph_ns, 0, sizeof(spo->graph_ns));
+        int rebuild = spo->graph_pixel_range != spo->graph_max || spo->graph_pixel_scale != scale ||
+                      spo->graph_serial > spo->history_serial ||
+                      spo->history_serial - spo->graph_serial > 120;
+        uint32_t updates = (uint32_t)(spo->history_serial - spo->graph_serial);
+        if (rebuild) {
             spo->graph_pixel_range = spo->graph_max;
             spo->graph_pixel_scale = scale;
             spo->graph_pixel_factor = 20.0 * scale / (spo->graph_max * 1e6);
+            memset(spo->mesh.graph_data, 0, sizeof(spo->mesh.graph_data));
+            spo->mesh.graph_head = 0;
+            spo->mesh.graph_epoch++;
+            updates = spo->history_count < 120 ? spo->history_count : 120;
         }
-        memset(spo->mesh.graph_words, 0, sizeof(spo->mesh.graph_words));
-        spo->mesh.graph_scale = (uint32_t)scale;
-        for (i = 0; i < count; i++) {
-            uint32_t at = (spo->history_next + SPO_HISTORY - count + i) % SPO_HISTORY;
+        for (i = 0; i < updates; i++) {
+            uint32_t at = (spo->history_next + SPO_HISTORY - updates + i) % SPO_HISTORY;
             uint64_t ns = spo->intervals[at];
-            if (ns != spo->graph_ns[at]) {
-                int pixels = (int)ceil((double)ns * spo->graph_pixel_factor);
-                if (pixels < 1)
-                    pixels = 1;
-                if (pixels > 20 * scale)
-                    pixels = 20 * scale;
-                spo->graph_pixels[at] =
-                    (uint8_t)(pixels | ((double)ns > spo->graph_max * 1e6 ? 128 : 0));
-                spo->graph_ns[at] = ns;
-            }
-            uint32_t column = 120 - count + i;
-            spo->mesh.graph_words[column / 4] |= (uint32_t)spo->graph_pixels[at]
-                                                 << ((column % 4) * 8);
+            double height = (double)ns * spo->graph_pixel_factor;
+            int pixels = height >= 20 * scale ? 20 * scale : height < 1 ? 1 : (int)ceil(height);
+            uint8_t *pixel = spo->mesh.graph_data[spo->mesh.graph_head];
+            pixel[0] = (uint8_t)pixels;
+            pixel[1] = (double)ns > spo->graph_max * 1e6 ? 255 : 0;
+            pixel[2] = 0;
+            pixel[3] = 255;
+            spo->mesh.graph_head = (spo->mesh.graph_head + 1) % 120;
+            spo->mesh.graph_version++;
         }
+        spo->graph_serial = spo->history_serial;
+        spo->mesh.graph_scale = (uint32_t)scale;
+        spo->mesh.graph_count = count;
         if (reuse_base && old_count && spo->graph_label_range == spo->graph_max) {
             spo->mesh.count = old_count;
             return SPO_OK;
         }
         if (reuse_base) {
+            spo->mesh.revision++;
             spo->mesh.count = spo->base_count;
         }
         if (!quad(x, graph_y, 120 * scale, 20 * scale, -1, 0, -120, 20, accent, alpha))
