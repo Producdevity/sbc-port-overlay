@@ -69,15 +69,16 @@ static void simulate_readings(int bad) {
     static const double normal[SPO_ITEM_COUNT] = {
         [SPO_SYSTEM_CPU] = 34,  [SPO_PROCESS_CPU] = 21, [SPO_GPU_LOAD] = 62,
         [SPO_CPU_CLOCK] = 1512, [SPO_GPU_CLOCK] = 648,  [SPO_TEMPERATURE] = 52,
-        [SPO_BATTERY] = 87,     [SPO_RSS] = 412,        [SPO_MEM_AVAILABLE] = 503};
+        [SPO_BATTERY] = 87,     [SPO_RSS] = 412,        [SPO_MEM_AVAILABLE] = 503, [SPO_CHARGING] = 1};
     static const double worn[SPO_ITEM_COUNT] = {
         [SPO_SYSTEM_CPU] = 97,  [SPO_PROCESS_CPU] = 88, [SPO_GPU_LOAD] = 89,
         [SPO_CPU_CLOCK] = 1008, [SPO_GPU_CLOCK] = 360,  [SPO_TEMPERATURE] = 83,
-        [SPO_BATTERY] = 8,      [SPO_RSS] = 702,        [SPO_MEM_AVAILABLE] = 41};
+        [SPO_BATTERY] = 8,      [SPO_RSS] = 702,        [SPO_MEM_AVAILABLE] = 41, [SPO_CHARGING] = 0};
     uint64_t now = spo_now();
     int i;
-    for (i = SPO_SYSTEM_CPU; i < SPO_SELF_COST; i++)
-        spo->metrics[i] = (spo_metric){bad ? worn[i] : normal[i], now, 1};
+    for (i = SPO_SYSTEM_CPU; i < SPO_ITEM_COUNT; i++)
+        if (i != SPO_SELF_COST)
+            spo->metrics[i] = (spo_metric){bad ? worn[i] : normal[i], now, 1};
     spo->available_items = SPO_BIT(SPO_ITEM_COUNT) - 1;
     spo->battery_charging = !bad;
 }

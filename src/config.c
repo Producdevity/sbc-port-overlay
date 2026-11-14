@@ -11,7 +11,7 @@
 static const char *const keys[SPO_ITEM_COUNT] = {
     "fps",         "frame_time", "graph",         "low_1",     "system_cpu",
     "process_cpu", "gpu_load",   "cpu_clock",     "gpu_clock", "temperature",
-    "battery",     "rss",        "mem_available", "self_cost"};
+    "battery",     "rss",        "mem_available", "self_cost", "charging"};
 static const char *const anchors[] = {"top_left",    "top_center",    "top_right",
                                       "center_left", "center",        "center_right",
                                       "bottom_left", "bottom_center", "bottom_right"};
@@ -163,7 +163,11 @@ spo_result spo_config_load(void) {
     if (spo->overlay.custom)
         for (i = 0; i < SPO_ITEM_COUNT; i++) {
             int32_t value;
-            if (spo_ini_get("spo.items", keys[i], &value) && (value == 0 || value == 1)) {
+            if (i == SPO_CHARGING && !spo_ini_has("spo.items", keys[i]))
+                value = !!(spo->overlay.items & SPO_BIT(SPO_BATTERY));
+            else if (!spo_ini_get("spo.items", keys[i], &value))
+                continue;
+            if (value == 0 || value == 1) {
                 if (value)
                     spo->overlay.items |= SPO_BIT(i);
                 else

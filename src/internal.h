@@ -42,7 +42,7 @@ enum {
 };
 typedef struct {
     char label[17], cell[3][24];
-    uint8_t tone[3], reserve[3];
+    uint8_t tone[3], reserve[3], span;
 } spo_row;
 typedef struct {
     char key[33], label[25];
@@ -143,6 +143,8 @@ int spo_text_copy(char *, size_t, const char *);
 int spo_key_valid(const char *);
 spo_result spo_fail(spo_result);
 void spo_apply_preset(uint32_t);
+void spo_overlay_sync(void);
+uint32_t spo_preset_items(uint32_t);
 void spo_numeric_refresh(uint64_t);
 void spo_menu_button(spo_button);
 int spo_menu_rows(void);

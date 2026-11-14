@@ -108,7 +108,8 @@ static int item_index(int row) {
     static const int frame[] = {SPO_FPS, SPO_FRAME_TIME, SPO_GRAPH, SPO_LOW_1};
     static const int system[] = {SPO_SYSTEM_CPU, SPO_PROCESS_CPU, SPO_GPU_LOAD,
                                  SPO_CPU_CLOCK,  SPO_GPU_CLOCK,   SPO_TEMPERATURE,
-                                 SPO_BATTERY,    SPO_RSS,         SPO_MEM_AVAILABLE};
+                                 SPO_BATTERY,    SPO_CHARGING,    SPO_RSS,
+                                 SPO_MEM_AVAILABLE};
     return spo->detail == 2 ? frame[row] : system[row];
 }
 static int item_available(int item) {
@@ -140,7 +141,7 @@ int spo_menu_rows(void) {
     if (spo->detail == 2)
         return 4;
     if (spo->detail == 3)
-        return 9;
+        return 10;
     if (spo->detail == 4)
         return (int)spo->counter_count;
     if (spo->detail == 5)
@@ -175,7 +176,7 @@ static void change(int dir, int activate) {
             int target = item_index_target(row);
             if (target == 6) {
                 spo->overlay.items ^= SPO_BIT(SPO_SELF_COST);
-                spo->overlay.custom = 1;
+                spo_overlay_sync();
                 spo->dirty = 1;
             } else {
                 spo->detail = target;
@@ -186,7 +187,7 @@ static void change(int dir, int activate) {
         int item = item_index(row);
         if (item_available(item)) {
             spo->overlay.items ^= SPO_BIT(item);
-            spo->overlay.custom = 1;
+            spo_overlay_sync();
             spo->dirty = 1;
             spo_metrics_reset();
             spo_metrics_request();
@@ -194,7 +195,7 @@ static void change(int dir, int activate) {
     } else if (spo->detail == 4 || spo->detail == 5) {
         uint32_t *mask = spo->detail == 4 ? &spo->counter_mask : &spo->indicator_mask;
         *mask ^= SPO_BIT(row);
-        spo->overlay.custom = 1;
+        spo_overlay_sync();
         spo->dirty = 1;
     } else if (!spo->root) {
         spo_overlay_settings *o = &spo->overlay;

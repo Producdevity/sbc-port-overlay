@@ -60,22 +60,46 @@ static int registering(void) {
     return usable() && !spo->frozen;
 }
 
-void spo_apply_preset(uint32_t p) {
+uint32_t spo_preset_items(uint32_t p) {
     uint32_t mask = 0;
     if (p >= 1)
         mask |= SPO_BIT(SPO_FPS);
     if (p >= 2)
         mask |= SPO_BIT(SPO_FRAME_TIME);
-    if (p >= 3)
+    if (p == 3)
         mask |= SPO_BIT(SPO_GRAPH) | SPO_BIT(SPO_SYSTEM_CPU) | SPO_BIT(SPO_GPU_LOAD);
     if (p == 4)
-        mask = ((SPO_BIT(SPO_ITEM_COUNT) - 1) & ~SPO_BIT(SPO_LOW_1));
+        mask = SPO_BIT(SPO_ITEM_COUNT) - 1;
+    return mask;
+}
+void spo_apply_preset(uint32_t p) {
     spo->overlay.preset = p;
     spo->overlay.custom = 0;
-    spo->overlay.items = mask;
+    spo->overlay.items = spo_preset_items(p);
     spo->counter_mask = p == 4 ? 255 : 0;
     spo->indicator_mask = p == 4 ? 255 : 0;
     spo_metrics_request();
+}
+/* The preset field names the preset the toggles match; custom is set when none matches. */
+void spo_overlay_sync(void) {
+    static const uint32_t sensors = SPO_BIT(SPO_SYSTEM_CPU) | SPO_BIT(SPO_PROCESS_CPU) |
+                                    SPO_BIT(SPO_GPU_LOAD) | SPO_BIT(SPO_CPU_CLOCK) |
+                                    SPO_BIT(SPO_GPU_CLOCK) | SPO_BIT(SPO_TEMPERATURE) |
+                                    SPO_BIT(SPO_BATTERY) | SPO_BIT(SPO_RSS) |
+                                    SPO_BIT(SPO_MEM_AVAILABLE) | SPO_BIT(SPO_CHARGING);
+    uint32_t compared = ~(sensors & ~spo->available_items), p, i;
+    uint32_t counters = SPO_BIT(spo->counter_count) - 1, indicators = SPO_BIT(spo->indicator_count) - 1;
+    for (i = 0; i < 5; i++) {
+        p = (spo->overlay.preset + i) % 5;
+        if (((spo->overlay.items ^ spo_preset_items(p)) & compared) == 0 &&
+            (spo->counter_mask & counters) == (p == 4 ? counters : 0) &&
+            (spo->indicator_mask & indicators) == (p == 4 ? indicators : 0)) {
+            spo->overlay.preset = p;
+            spo->overlay.custom = 0;
+            return;
+        }
+    }
+    spo->overlay.custom = 1;
 }
 spo_result spo_init(const spo_config *c) {
     spo_result result;
@@ -114,6 +138,7 @@ spo_result spo_init(const spo_config *c) {
         spo_shutdown();
         return result;
     }
+    spo_overlay_sync();
     if (!(c->flags & SPO_INIT_NO_RENDER)) {
         result = spo_backend_init();
         if (result != SPO_OK) {
@@ -298,6 +323,7 @@ spo_result spo_register_counter(const spo_counter_desc *d, spo_id *id) {
         }
     }
     *id = ++spo->counter_count;
+    spo_overlay_sync();
     return SPO_OK;
 }
 spo_result spo_register_indicator(const spo_indicator_desc *d, spo_id *id) {
@@ -329,6 +355,7 @@ spo_result spo_register_indicator(const spo_indicator_desc *d, spo_id *id) {
         }
     }
     *id = ++spo->indicator_count;
+    spo_overlay_sync();
     return SPO_OK;
 }
 spo_result spo_counter_set(spo_id id, double value) {
@@ -370,11 +397,11 @@ spo_result spo_overlay_set(const spo_overlay_settings *in) {
         spo_metrics_reset();
     }
     {
-        uint32_t changed = in->items != spo->overlay.items;
+        uint32_t preset = spo->overlay.preset;
         spo->overlay = *in;
-        if (changed)
-            spo->overlay.custom = 1;
+        spo->overlay.preset = preset;
     }
+    spo_overlay_sync();
     spo->dirty = 1;
     spo_metrics_request();
     return SPO_OK;

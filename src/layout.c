@@ -33,7 +33,8 @@ const char *spo_item_name(uint32_t i) {
                                   "Battery",
                                   "Process RSS",
                                   "Available memory",
-                                  "Self cost"};
+                                  "Overlay cost",
+                                  "Charging"};
     return i < SPO_ITEM_COUNT ? names[i] : "?";
 }
 static int quad(int x, int y, int w, int h, float u, float v, float uw, float vh,
@@ -177,18 +178,24 @@ static void put(spo_row *r, int cell, int tone, int reserve, const char *format,
 static int visible(int id) {
     return (spo->overlay.items & SPO_BIT(id)) && spo->metrics[id].valid;
 }
+/* A value that is on shows a placeholder until the sampler delivers it. */
+static int wanted(int id) {
+    return (spo->overlay.items & SPO_BIT(id)) &&
+           (spo->metrics[id].valid || (spo->available_items & SPO_BIT(id)));
+}
 static void formatted(uint64_t now) {
     spo_row previous[40];
     uint32_t i, previous_count = spo->row_count, previous_header = spo->header_rows;
     spo_row *r;
     double v;
     int fps = !!(spo->overlay.items & SPO_BIT(SPO_FPS)),
-        time = !!(spo->overlay.items & SPO_BIT(SPO_FRAME_TIME));
+        time = !!(spo->overlay.items & SPO_BIT(SPO_FRAME_TIME)),
+        low = !!(spo->overlay.items & SPO_BIT(SPO_LOW_1));
     memcpy(previous, spo->rows, sizeof(previous));
     spo->row_count = 0;
     update_target();
-    if (fps || time) {
-        r = new_row(fps ? "FPS" : "TIME");
+    if (fps || time || low) {
+        r = new_row("FPS");
         if (fps && spo->fps > 0)
             put(r, 0, tone_rate(spo->fps), 5, "%.1f", spo->fps);
         else if (fps)
@@ -198,52 +205,71 @@ static void formatted(uint64_t now) {
                 spo->frame_ms);
         else if (time)
             put(r, 1, SPO_TONE_VALUE, 8, "-- ms");
-    }
-    if (spo->overlay.items & SPO_BIT(SPO_LOW_1)) {
-        r = new_row("1% LOW");
-        if (spo->low_1 > 0)
-            put(r, 0, tone_rate(spo->low_1), 5, "%.1f", spo->low_1);
-        else
-            put(r, 0, SPO_TONE_VALUE, 5, "--");
+        if (low && spo->low_1 > 0)
+            put(r, 2, tone_rate(spo->low_1), 8, "%.1f low", spo->low_1);
+        else if (low)
+            put(r, 2, SPO_TONE_VALUE, 8, "-- low");
     }
     spo->header_rows = spo->row_count;
-    if (visible(SPO_SYSTEM_CPU) || visible(SPO_CPU_CLOCK) || visible(SPO_PROCESS_CPU)) {
+    if (wanted(SPO_SYSTEM_CPU) || wanted(SPO_CPU_CLOCK) || wanted(SPO_TEMPERATURE)) {
         r = new_row("CPU");
         if (visible(SPO_SYSTEM_CPU)) {
             v = spo->metrics[SPO_SYSTEM_CPU].value;
             put(r, 0, tone_load(v), 4, "%.0f%%", v);
-        }
+        } else if (wanted(SPO_SYSTEM_CPU))
+            put(r, 0, SPO_TONE_VALUE, 4, "--");
         if (visible(SPO_CPU_CLOCK))
             put(r, 1, SPO_TONE_VALUE, 8, "%.0f MHz", spo->metrics[SPO_CPU_CLOCK].value);
-        if (visible(SPO_PROCESS_CPU))
-            put(r, 2, SPO_TONE_VALUE, 6, "%.0f%% app", spo->metrics[SPO_PROCESS_CPU].value);
+        else if (wanted(SPO_CPU_CLOCK))
+            put(r, 1, SPO_TONE_VALUE, 8, "--");
+        if (visible(SPO_TEMPERATURE)) {
+            v = spo->metrics[SPO_TEMPERATURE].value;
+            put(r, 2, tone_temperature(v), 4, "%.0f C", v);
+        } else if (wanted(SPO_TEMPERATURE))
+            put(r, 2, SPO_TONE_VALUE, 4, "--");
     }
-    if (visible(SPO_GPU_LOAD) || visible(SPO_GPU_CLOCK)) {
+    if (wanted(SPO_GPU_LOAD) || wanted(SPO_GPU_CLOCK)) {
         r = new_row("GPU");
         if (visible(SPO_GPU_LOAD)) {
             v = spo->metrics[SPO_GPU_LOAD].value;
             put(r, 0, tone_load(v), 4, "%.0f%%", v);
-        }
+        } else if (wanted(SPO_GPU_LOAD))
+            put(r, 0, SPO_TONE_VALUE, 4, "--");
         if (visible(SPO_GPU_CLOCK))
             put(r, 1, SPO_TONE_VALUE, 8, "%.0f MHz", spo->metrics[SPO_GPU_CLOCK].value);
+        else if (wanted(SPO_GPU_CLOCK))
+            put(r, 1, SPO_TONE_VALUE, 8, "--");
     }
-    if (visible(SPO_RSS) || visible(SPO_MEM_AVAILABLE)) {
-        r = new_row("MEM");
+    if (wanted(SPO_PROCESS_CPU) || wanted(SPO_RSS)) {
+        r = new_row("GAME");
+        if (visible(SPO_PROCESS_CPU))
+            put(r, 0, SPO_TONE_VALUE, 4, "%.0f%%", spo->metrics[SPO_PROCESS_CPU].value);
+        else if (wanted(SPO_PROCESS_CPU))
+            put(r, 0, SPO_TONE_VALUE, 4, "--");
         if (visible(SPO_RSS))
-            put(r, 0, SPO_TONE_VALUE, 6, "%.0f MB", spo->metrics[SPO_RSS].value);
+            put(r, 1, SPO_TONE_VALUE, 8, "%.0f MB", spo->metrics[SPO_RSS].value);
+        else if (wanted(SPO_RSS))
+            put(r, 1, SPO_TONE_VALUE, 8, "--");
+    }
+    if (wanted(SPO_MEM_AVAILABLE)) {
+        r = new_row("RAM");
+        r->span = 2;
         if (visible(SPO_MEM_AVAILABLE))
-            put(r, 1, SPO_TONE_VALUE, 9, "%.0f free", spo->metrics[SPO_MEM_AVAILABLE].value);
+            put(r, 0, SPO_TONE_VALUE, 12, "%.0f MB free", spo->metrics[SPO_MEM_AVAILABLE].value);
+        else
+            put(r, 0, SPO_TONE_VALUE, 12, "--");
     }
-    if (visible(SPO_TEMPERATURE)) {
-        v = spo->metrics[SPO_TEMPERATURE].value;
-        put(new_row("TEMP"), 0, tone_temperature(v), 5, "%.0f C", v);
-    }
-    if (visible(SPO_BATTERY)) {
-        v = spo->metrics[SPO_BATTERY].value;
+    if (wanted(SPO_BATTERY) || wanted(SPO_CHARGING)) {
         r = new_row("BAT");
-        put(r, 0, tone_battery(v), 4, "%.0f%%", v);
-        if (spo->battery_charging)
-            put(r, 1, SPO_TONE_GOOD, 8, "CHG");
+        if (visible(SPO_BATTERY)) {
+            v = spo->metrics[SPO_BATTERY].value;
+            put(r, 0, tone_battery(v), 4, "%.0f%%", v);
+        } else if (wanted(SPO_BATTERY))
+            put(r, 0, SPO_TONE_VALUE, 4, "--");
+        if (visible(SPO_CHARGING))
+            put(r, 1, spo->battery_charging ? SPO_TONE_GOOD : SPO_TONE_DIM, 3, "CHG");
+        else if (wanted(SPO_CHARGING))
+            put(r, 1, SPO_TONE_VALUE, 3, "--");
     }
     for (i = 0; i < spo->counter_count; i++)
         if ((spo->counter_mask & SPO_BIT(i)) && spo->counters[i].valid) {
@@ -253,6 +279,7 @@ static void formatted(uint64_t now) {
             if (strlen(number) > 14)
                 snprintf(number, sizeof(number), "%.2g", c->value);
             r = new_row(c->label);
+            r->span = 3;
             if (strlen(number) + (c->unit[0] ? strlen(c->unit) + 1 : 0) > 23)
                 put(r, 0, SPO_TONE_VALUE, 0, "overflow");
             else
@@ -261,17 +288,17 @@ static void formatted(uint64_t now) {
     for (i = 0; i < spo->indicator_count; i++)
         if ((spo->indicator_mask & SPO_BIT(i)) && spo->indicators[i].valid) {
             int on = !!spo->indicators[i].value;
-            put(new_row(spo->indicators[i].label), 0, on ? SPO_TONE_VALUE : SPO_TONE_DIM, 0,
-                on ? "ON" : "OFF");
+            r = new_row(spo->indicators[i].label);
+            r->span = 3;
+            put(r, 0, on ? SPO_TONE_VALUE : SPO_TONE_DIM, 0, on ? "ON" : "OFF");
         }
     if (spo->overlay.items & SPO_BIT(SPO_SELF_COST)) {
-        put(new_row("DRAW"), 0, SPO_TONE_DIM, 5, "%u", spo->stats.draw_calls);
-        r = new_row("SELF");
-        if (spo->sampling_stats.sample_frames) {
+        r = new_row("OVERLAY");
+        if (spo->sampling_stats.sample_frames)
             put(r, 0, SPO_TONE_DIM, 5, "%.0f us", spo->sampling_stats.total_cpu_us_per_frame);
-        } else if (spo->stats.sample_frames) {
+        else if (spo->stats.sample_frames)
             put(r, 0, SPO_TONE_DIM, 5, "%.0f us", spo->stats.cpu_us_mean);
-        } else
+        else
             put(r, 0, SPO_TONE_DIM, 5, "-- us");
     }
     if (!spo->formatted_at || previous_count != spo->row_count ||
@@ -286,8 +313,26 @@ static void formatted(uint64_t now) {
 }
 
 typedef struct {
-    int size, cw, ch, px, py, gap, gw, gh, label_chars, start[3], width[3], w, h;
+    int size, cw, ch, px, py, gap, gw, gh, label_chars, start[3], width[3], edge[4], w, h;
 } plan;
+static void column_starts(plan *p) {
+    int k, chars = p->label_chars;
+    for (k = 0; k < 3; k++) {
+        p->start[k] = 0;
+        if (p->width[k]) {
+            p->start[k] = chars + 1;
+            chars += 1 + p->width[k];
+        }
+    }
+}
+/* Right edge, in characters, of the last used column among the first n. */
+static int span_edge(const plan *p, int n) {
+    int k;
+    for (k = n - 1; k >= 0; k--)
+        if (p->width[k])
+            return p->start[k] + p->width[k];
+    return -1;
+}
 static void measure(plan *p, int size, int graph) {
     const spo_font_info *f = spo_font_get((uint32_t)size);
     uint32_t i;
@@ -305,7 +350,7 @@ static void measure(plan *p, int size, int graph) {
         int n = (int)strlen(spo->rows[i].label);
         if (n > p->label_chars)
             p->label_chars = n;
-        for (k = 0; k < 3; k++) {
+        for (k = spo->rows[i].span ? 1 : 0; k < 3; k++) {
             int need = (int)strlen(spo->rows[i].cell[k]);
             if (spo->rows[i].reserve[k] > need)
                 need = spo->rows[i].reserve[k];
@@ -313,12 +358,30 @@ static void measure(plan *p, int size, int graph) {
                 p->width[k] = need;
         }
     }
+    column_starts(p);
+    for (i = 0; i < spo->row_count; i++) {
+        const spo_row *r = &spo->rows[i];
+        int need = (int)strlen(r->cell[0]), edge;
+        if (!r->span)
+            continue;
+        if (r->reserve[0] > need)
+            need = r->reserve[0];
+        edge = span_edge(p, r->span);
+        if (edge < 0) {
+            p->width[r->span - 1] = need;
+        } else if (need > edge - (p->label_chars + 1)) {
+            for (k = r->span - 1; k > 0 && !p->width[k]; k--)
+                ;
+            p->width[k] += need - (edge - (p->label_chars + 1));
+        }
+        column_starts(p);
+    }
+    for (k = 1; k <= 3; k++)
+        p->edge[k] = span_edge(p, k);
     chars = p->label_chars;
     for (k = 0; k < 3; k++)
-        if (p->width[k]) {
-            p->start[k] = chars + 1;
-            chars += 1 + p->width[k];
-        }
+        if (p->width[k])
+            chars = p->start[k] + p->width[k];
     p->w = chars * p->cw;
     if (graph && p->gw > p->w)
         p->w = p->gw;
@@ -332,6 +395,9 @@ static int draw_row(const plan *p, const spo_row *r, int x, int y, uint8_t alpha
     int k;
     if (!text(x, y, r->label, palette[SPO_TONE_LABEL], alpha))
         return 0;
+    if (r->span)
+        return !r->cell[0][0] ||
+               text_right(x + p->edge[r->span] * p->cw, y, r->cell[0], palette[r->tone[0]], alpha);
     for (k = 0; k < 3; k++)
         if (r->cell[k][0] && !text_right(x + (p->start[k] + p->width[k]) * p->cw, y, r->cell[k],
                                          palette[r->tone[k]], alpha))
@@ -352,17 +418,18 @@ static void menu_row(int row, char *label, char *value, int *tone) {
     static const int frames[] = {SPO_FPS, SPO_FRAME_TIME, SPO_GRAPH, SPO_LOW_1};
     static const int system[] = {SPO_SYSTEM_CPU, SPO_PROCESS_CPU, SPO_GPU_LOAD,
                                  SPO_CPU_CLOCK,  SPO_GPU_CLOCK,   SPO_TEMPERATURE,
-                                 SPO_BATTERY,    SPO_RSS,         SPO_MEM_AVAILABLE};
+                                 SPO_BATTERY,    SPO_CHARGING,    SPO_RSS,
+                                 SPO_MEM_AVAILABLE};
     label[0] = value[0] = 0;
     *tone = SPO_TONE_ACCENT;
     if (spo->detail == 1) {
-        const char *names[5] = {"Frames", "System", NULL, NULL, "Self cost"};
+        const char *names[5] = {"Frames", "System", NULL, NULL, "Overlay cost"};
         int n = 2;
         if (spo->counter_count)
             names[n++] = "Port counters";
         if (spo->indicator_count)
             names[n++] = "Port indicators";
-        names[n++] = "Self cost";
+        names[n++] = "Overlay cost";
         snprintf(label, 64, "%s", names[row]);
         if (row == n - 1) {
             int on = !!(spo->overlay.items & SPO_BIT(SPO_SELF_COST));
@@ -457,7 +524,7 @@ static int menu_fit(menu_plan *m, int size, uint32_t width, uint32_t height) {
     if (m->cols > 72)
         m->cols = 72;
     m->w = m->cols * f->cw + 2 * m->padx;
-    m->h = m->pady + m->bar + 10 + 9 * m->rowh + 6 + 2 * f->ch + 6 + f->ch + m->pady;
+    m->h = m->pady + m->bar + 10 + 10 * m->rowh + 6 + 2 * f->ch + 6 + f->ch + m->pady;
     return m->cols >= 40 && m->h <= (int)height - 16;
 }
 static int wrapped(const menu_plan *m, int x, int y, const char *value, const uint8_t rgb[3],
@@ -532,7 +599,7 @@ static spo_result menu(uint32_t width, uint32_t height) {
             int lines = ((int)strlen(about[i]) + m.cols - 1) / m.cols;
             if (lines < 1)
                 lines = 1;
-            if ((row + lines) * m.ch > 9 * m.rowh)
+            if ((row + lines) * m.ch > 10 * m.rowh)
                 break;
             if (!wrapped(&m, x + m.padx, y + row * m.ch, about[i],
                          palette[i < 4 ? SPO_TONE_VALUE : SPO_TONE_DIM], 8))
@@ -549,7 +616,7 @@ static spo_result menu(uint32_t width, uint32_t height) {
                 !text_right(x + m.w - m.padx, ry + 2, value, palette[tone], 255))
                 return SPO_CAPACITY;
         }
-    y += 9 * m.rowh + 6;
+    y += 10 * m.rowh + 6;
     if (!spo->detail && spo->root > 0 && spo->root <= (int)spo->page_count && spo->cursor >= 0) {
         spo_option *o = spo_menu_option(spo->cursor);
         if (o && !wrapped(&m, x + m.padx, y, o->help, palette[SPO_TONE_LABEL], 2))

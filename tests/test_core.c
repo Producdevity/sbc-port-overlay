@@ -163,14 +163,19 @@ static void presets(void) {
         assert(!!(spo->overlay.items & SPO_BIT(SPO_FRAME_TIME)) == (p >= 2));
         assert(!!(spo->overlay.items & SPO_BIT(SPO_GRAPH)) == (p >= 3));
         assert(!!(spo->overlay.items & SPO_BIT(SPO_SELF_COST)) == (p == 4));
-        assert(!(spo->overlay.items & SPO_BIT(SPO_LOW_1)));
+        assert(!!(spo->overlay.items & SPO_BIT(SPO_LOW_1)) == (p == 4));
+        assert(!!(spo->overlay.items & SPO_BIT(SPO_CHARGING)) == (p == 4));
+        assert(spo->overlay.preset == p && !spo->overlay.custom);
     }
     assert(spo_preset_set(5) == SPO_INVALID);
     assert(spo_preset_set(0) == SPO_OK);
     assert(spo_frame(640, 480) == SPO_OK);
     assert(!spo->mesh.count && !spo->frame_reads);
     spo_overlay_settings o = spo->overlay;
-    o.items = SPO_BIT(SPO_FPS);
+    o.items = SPO_BIT(SPO_FPS) | SPO_BIT(SPO_FRAME_TIME);
+    assert(spo_overlay_set(&o) == SPO_OK);
+    assert(spo->overlay.preset == 2 && !spo->overlay.custom);
+    o.items = SPO_BIT(SPO_FPS) | SPO_BIT(SPO_LOW_1);
     assert(spo_overlay_set(&o) == SPO_OK);
     assert(spo->overlay.custom);
     assert(spo_frame(640, 480) == SPO_OK && spo->mesh.count > 0);
@@ -270,7 +275,7 @@ static void maximal_layout(void) {
         assert(spo_indicator_set(id, 1) == SPO_OK);
     }
     assert(spo_preset_set(4) == SPO_OK);
-    for (i = SPO_SYSTEM_CPU; i <= SPO_MEM_AVAILABLE; i++)
+    for (i = SPO_SYSTEM_CPU; i <= SPO_CHARGING; i++)
         spo->metrics[i] = (spo_metric){100, spo_now(), 1};
     assert(spo_layout(640, 480) == SPO_OK);
     assert(spo->row_count >= 20 && spo->panel.y >= 8 && spo->panel.y + spo->panel.h <= 472);
@@ -333,7 +338,7 @@ static void persistence(void) {
     int32_t value;
     spo_config c;
     const char *ini = "[spo]\npreset=3\ncustom=1\nanchor=bottom_right\n[spo.items]\nprocess_cpu="
-                      "1\n[port.graphics]\nscale=75\n[future]\nretain=yes\n";
+                      "1\nbattery=1\n[port.graphics]\nscale=75\n[future]\nretain=yes\n";
     assert(fd >= 0);
     assert(write(fd, ini, strlen(ini)) == (ssize_t)strlen(ini));
     close(fd);
@@ -345,6 +350,7 @@ static void persistence(void) {
     assert(change_calls == 1);
     assert(spo_option_get(id, &value) == SPO_OK && value == 75);
     assert(spo->overlay.anchor == 8 && spo->overlay.items & SPO_BIT(SPO_PROCESS_CPU));
+    assert(spo->overlay.items & SPO_BIT(SPO_CHARGING));
     reject = 1;
     assert(spo_option_set(id, 80) == SPO_REJECTED);
     reject = 0;
@@ -532,7 +538,7 @@ static void colours(void) {
     spo_overlay_settings settings;
     reset();
     assert(spo_preset_set(4) == SPO_OK);
-    for (int i = SPO_SYSTEM_CPU; i <= SPO_MEM_AVAILABLE; i++)
+    for (int i = SPO_SYSTEM_CPU; i <= SPO_CHARGING; i++)
         spo->metrics[i] = (spo_metric){10, spo_now(), 1};
     steady_history(16.7);
     spo->frame_ms = 16.7;
@@ -576,14 +582,14 @@ static void colours(void) {
             spo->metrics[SPO_BATTERY].value = charge[i];
             relayout();
             assert(find_row("CPU")->tone[0] == ladder[i] && find_row("GPU")->tone[0] == ladder[i]);
-            assert(find_row("TEMP")->tone[0] == ladder[i]);
+            assert(find_row("CPU")->tone[2] == ladder[i]);
             assert(find_row("BAT")->tone[0] == ladder[i]);
         }
     }
     spo->battery_charging = 1;
     relayout();
     assert(!strcmp(find_row("BAT")->cell[1], "CHG"));
-    assert(find_row("SELF")->tone[0] == SPO_TONE_DIM && find_row("DRAW")->tone[0] == SPO_TONE_DIM);
+    assert(find_row("OVERLAY")->tone[0] == SPO_TONE_DIM && !find_row("DRAW") && !find_row("SELF"));
     /* The graph bar colours follow the same thresholds. */
     settings = spo->overlay;
     settings.items = SPO_BIT(SPO_GRAPH);
@@ -602,8 +608,8 @@ static void sample_metrics(void) {
     static const double values[SPO_ITEM_COUNT] = {
         [SPO_SYSTEM_CPU] = 3,  [SPO_PROCESS_CPU] = 6,    [SPO_CPU_CLOCK] = 1512,
         [SPO_GPU_CLOCK] = 360, [SPO_TEMPERATURE] = 42,   [SPO_BATTERY] = 94,
-        [SPO_RSS] = 44,        [SPO_MEM_AVAILABLE] = 796};
-    for (int i = SPO_SYSTEM_CPU; i <= SPO_MEM_AVAILABLE; i++)
+        [SPO_RSS] = 44,        [SPO_MEM_AVAILABLE] = 796, [SPO_CHARGING] = 1};
+    for (int i = SPO_SYSTEM_CPU; i <= SPO_CHARGING; i++)
         if (i != SPO_GPU_LOAD)
             spo->metrics[i] = (spo_metric){values[i], spo_now(), 1};
     spo->battery_charging = 1;
@@ -630,7 +636,7 @@ static void layouts(void) {
         sample_metrics();
         relayout();
         assert(spo->actual_scale == 2 && spo->mesh.font == 2);
-        assert(spo->panel.w * spo->panel.h <= before[preset]);
+        assert(spo->panel.w * spo->panel.h <= before[preset] * 5 / 4);
         assert(spo->mesh.count % 6 == 0 && spo->mesh.count <= SPO_QUADS * 6);
         for (uint32_t i = 0; i < spo->mesh.count; i++) {
             const spo_vertex *v = &spo->mesh.vertices[i];
@@ -646,20 +652,22 @@ static void layouts(void) {
             assert(spo->row_count == 1 && !strcmp(spo->rows[0].cell[0], "60.0") &&
                    !strcmp(spo->rows[0].cell[1], "16.7 ms"));
         if (preset == 3)
-            assert(find_row("FPS") && find_row("CPU") && !find_row("MEM") &&
+            assert(find_row("FPS") && find_row("CPU") && !find_row("RAM") && !find_row("GAME") &&
                    !strcmp(find_row("CPU")->cell[0], "3%") && !find_row("CPU")->cell[1][0]);
         if (preset == 4) {
             assert(!strcmp(find_row("CPU")->cell[0], "3%") &&
-                   !strcmp(find_row("CPU")->cell[1], "1512 MHz"));
+                   !strcmp(find_row("CPU")->cell[1], "1512 MHz") &&
+                   !strcmp(find_row("CPU")->cell[2], "42 C"));
             assert(!strcmp(find_row("GPU")->cell[1], "360 MHz") && !find_row("GPU")->cell[0][0]);
-            assert(!strcmp(find_row("MEM")->cell[0], "44 MB") &&
-                   !strcmp(find_row("MEM")->cell[1], "796 free"));
-            assert(!strcmp(find_row("TEMP")->cell[0], "42 C") &&
-                   !strcmp(find_row("BAT")->cell[0], "94%"));
+            assert(!strcmp(find_row("GAME")->cell[0], "6%") &&
+                   !strcmp(find_row("GAME")->cell[1], "44 MB"));
+            assert(!strcmp(find_row("RAM")->cell[0], "796 MB free"));
+            assert(!strcmp(find_row("BAT")->cell[0], "94%") &&
+                   !strcmp(find_row("BAT")->cell[1], "CHG"));
             assert(!strcmp(find_row("DRAWS")->cell[0], "1") &&
                    !strcmp(find_row("SHADERS")->cell[0], "OFF"));
-            assert(!strcmp(find_row("SELF")->cell[0], "91 us") &&
-                   !strcmp(find_row("DRAW")->cell[0], "1"));
+            assert(!strcmp(find_row("OVERLAY")->cell[0], "91 us"));
+            assert(!strcmp(find_row("FPS")->cell[2], "-- low"));
         }
     }
     /* Fixed-width fields keep the panel still while the digits change. */

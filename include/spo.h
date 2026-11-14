@@ -81,6 +81,7 @@ enum {
     SPO_RSS,
     SPO_MEM_AVAILABLE,
     SPO_SELF_COST,
+    SPO_CHARGING,
     SPO_ITEM_COUNT
 };
 enum {

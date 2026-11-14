@@ -228,7 +228,7 @@ void spo_readers_init(spo_sampler *sample) {
             snprintf(path, sizeof(path), "%s/capacity", matches.gl_pathv[i]);
             if (source(sample, path, BATTERY, SPO_BIT(SPO_BATTERY))) {
                 snprintf(path, sizeof(path), "%s/status", matches.gl_pathv[i]);
-                source(sample, path, CHARGING, SPO_BIT(SPO_BATTERY));
+                source(sample, path, CHARGING, SPO_BIT(SPO_CHARGING));
                 break;
             }
         }
@@ -275,11 +275,17 @@ static int decode(spo_sampler *sample, spo_source *s, const char *text, uint64_t
             return 0;
         metric(sample, SPO_RSS, (double)b * (double)sample->page_size / 1048576.0, now);
         if (sample->process_baseline && a >= sample->process_previous &&
-            now > sample->process_stamp)
+            now > sample->process_stamp) {
+#ifdef _SC_NPROCESSORS_ONLN
+            long cores = sysconf(_SC_NPROCESSORS_ONLN);
+#else
+            long cores = 1;
+#endif
             metric(sample, SPO_PROCESS_CPU,
                    100.0 * (double)(a - sample->process_previous) / (double)sample->ticks * 1e9 /
-                       (double)(now - sample->process_stamp),
+                       (double)(now - sample->process_stamp) / (double)(cores > 0 ? cores : 1),
                    now);
+        }
         else
             sample->live[SPO_PROCESS_CPU].valid = 0;
         sample->process_previous = a;
@@ -295,6 +301,7 @@ static int decode(spo_sampler *sample, spo_source *s, const char *text, uint64_t
     }
     if (s->kind == CHARGING) {
         sample->charging = !strncmp(text, "Charging", 8);
+        metric(sample, SPO_CHARGING, sample->charging, now);
         return 1;
     }
     if (s->kind == GPU_LOAD) {
