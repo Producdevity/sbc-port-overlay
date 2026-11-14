@@ -452,6 +452,7 @@ int main(int argc, char **argv) {
     assert(spo_overlay_set(&o) == SPO_OK);
     spo_reset_timing();
     spo->history_count = spo->history_next = 120;
+    spo->history_serial = 120;
     for (i = 0; i < 120; i++)
         spo->intervals[i] = 16666000;
     spo->graph_range_at = spo_now();
@@ -463,10 +464,11 @@ int main(int argc, char **argv) {
     glReadPixels(137, 480 - 18 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
     assert(pixel[0] < 130 && pixel[1] < 130);
     spo->intervals[60] = 100000000;
+    spo->bar_tone[60] = 0;
     spo->graph_serial = UINT64_MAX;
     spo->last_stamp = 0;
     assert(frame(640, 480) == SPO_OK);
-    glReadPixels(133, 480 - 16 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    glReadPixels(141, 480 - 16 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
     assert(pixel[0] > 200 && pixel[1] < 140 && pixel[2] < 140);
     assert(frame(640, 480) == SPO_OK);
     assert(draw_calls == 1 && upload_calls == 0);

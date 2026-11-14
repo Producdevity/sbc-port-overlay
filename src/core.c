@@ -173,6 +173,11 @@ void spo_reset_timing(void) {
     spo->graph_serial = UINT64_MAX;
     spo->graph_max = 33.333333;
     spo->graph_range_at = spo->graph_high_at = 0;
+    spo->target_locked = 0;
+    spo->target_candidate = 0;
+    spo->target_since = spo->low_floor = 0;
+    memset(spo->tone_ready, 0, sizeof(spo->tone_ready));
+    memset(spo->bar_tone, 0, sizeof(spo->bar_tone));
     spo_metrics_reset();
 }
 spo_result spo_register_page(const spo_page_desc *d, spo_id *id) {
@@ -432,22 +437,30 @@ void spo_numeric_refresh(uint64_t now) {
         spo->window_ns = 0;
         spo->window_frames = 0;
         spo->refresh_stamp = now;
-        if ((spo->overlay.items & SPO_BIT(SPO_LOW_1)) && spo->history_count >= 120) {
-            uint64_t worst[6] = {0};
-            uint32_t i, j, n = (spo->history_count + 99) / 100;
-            double sum = 0;
-            for (i = 0; i < spo->history_count; i++) {
-                uint64_t value = spo->intervals[i];
+        {
+            uint32_t frames = spo->history_serial > spo->low_floor
+                                  ? (uint32_t)(spo->history_serial - spo->low_floor)
+                                  : 0;
+            if (frames > spo->history_count)
+                frames = spo->history_count;
+            spo->low_1 = 0;
+            if ((spo->overlay.items & SPO_BIT(SPO_LOW_1)) && frames >= 120) {
+                uint64_t worst[6] = {0};
+                uint32_t i, j, n = (frames + 99) / 100;
+                double sum = 0;
+                for (i = 0; i < frames; i++) {
+                    uint64_t value = spo->intervals[(spo->history_next + SPO_HISTORY - 1 - i) % SPO_HISTORY];
+                    for (j = 0; j < n; j++)
+                        if (value > worst[j]) {
+                            uint64_t old = worst[j];
+                            worst[j] = value;
+                            value = old;
+                        }
+                }
                 for (j = 0; j < n; j++)
-                    if (value > worst[j]) {
-                        uint64_t old = worst[j];
-                        worst[j] = value;
-                        value = old;
-                    }
+                    sum += (double)worst[j];
+                spo->low_1 = sum > 0 ? 1e9 * (double)n / sum : 0;
             }
-            for (j = 0; j < n; j++)
-                sum += (double)worst[j];
-            spo->low_1 = sum > 0 ? 1e9 * (double)n / sum : 0;
         }
     }
 }
@@ -458,6 +471,14 @@ spo_result spo_get_stats(spo_stats *out) {
         return spo_fail(SPO_ABI);
     *out = spo->stats;
     return SPO_OK;
+}
+void spo_history_push(uint64_t interval) {
+    spo->history_serial++;
+    spo->intervals[spo->history_next] = interval;
+    spo->bar_tone[spo->history_next] = 0;
+    spo->history_next = (spo->history_next + 1) % SPO_HISTORY;
+    if (spo->history_count < SPO_HISTORY)
+        spo->history_count++;
 }
 spo_result spo_frame(uint32_t width, uint32_t height) {
     uint64_t now, start, cpu, end;
@@ -480,11 +501,7 @@ spo_result spo_frame(uint32_t width, uint32_t height) {
     spo->frame_reads = 0;
     if (spo->last_stamp && now > spo->last_stamp) {
         uint64_t dt = now - spo->last_stamp;
-        spo->history_serial++;
-        spo->intervals[spo->history_next] = dt;
-        spo->history_next = (spo->history_next + 1) % SPO_HISTORY;
-        if (spo->history_count < SPO_HISTORY)
-            spo->history_count++;
+        spo_history_push(dt);
         spo->window_ns += dt;
         spo->window_frames++;
     }

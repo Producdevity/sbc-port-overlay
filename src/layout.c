@@ -18,24 +18,6 @@ static const uint8_t panel_color[3] = {15, 19, 23}, highlight[3] = {40, 88, 108}
                      black[3] = {0, 0, 0}, rule[3] = {70, 80, 90};
 static const spo_font_info *face;
 
-const char *spo_item_name(uint32_t i) {
-    static const char *names[] = {"FPS",
-                                  "Frame time",
-                                  "Frame-time graph",
-                                  "1% low (512 samples)",
-                                  "System CPU",
-                                  "Process CPU",
-                                  "GPU load",
-                                  "CPU0 clock",
-                                  "GPU clock",
-                                  "SoC temperature",
-                                  "Battery",
-                                  "Process RSS",
-                                  "Available memory",
-                                  "Overlay cost",
-                                  "Charging"};
-    return i < SPO_ITEM_COUNT ? names[i] : "?";
-}
 static int quad(int x, int y, int w, int h, float u, float v, float uw, float vh,
                 const uint8_t rgb[3], uint8_t alpha) {
     spo_vertex a, b, c, d;
@@ -119,9 +101,8 @@ spo_rect spo_anchor(uint32_t width, uint32_t height, int w, int h, int anchor) {
     return (spo_rect){x, y, w, h};
 }
 
-/* Rates within 2% of the target count as on target, so a 59.94 Hz game is green at 60. */
-static int tone_rate(double rate) {
-    double ratio = spo->target_fps > 0 ? rate / spo->target_fps : 1;
+/* Rates within 2% of the reference count as on target, so a 59.94 Hz game is green at 60. */
+static int tone_ratio(double ratio) {
     return ratio >= 0.98 ? SPO_TONE_GOOD : ratio >= 0.9 ? SPO_TONE_WARN : SPO_TONE_BAD;
 }
 static int tone_load(double percent) {
@@ -133,38 +114,95 @@ static int tone_temperature(double celsius) {
 static int tone_battery(double percent) {
     return percent <= 10 ? SPO_TONE_BAD : percent <= 20 ? SPO_TONE_WARN : SPO_TONE_VALUE;
 }
-static void update_target(void) {
-    uint64_t sorted[120];
-    uint32_t i, count = spo->history_count < 120 ? spo->history_count : 120;
-    double rate = spo->fps;
-    static const double targets[] = {30, 60, 120};
-    if (spo->host_target) {
-        spo->target_fps = (double)spo->host_target;
-        return;
-    }
-    if (count >= 8) {
-        for (i = 0; i < count; i++) {
-            uint64_t value =
-                spo->intervals[(spo->history_next + SPO_HISTORY - count + i) % SPO_HISTORY];
-            uint32_t j = i;
-            while (j && sorted[j - 1] > value) {
-                sorted[j] = sorted[j - 1];
-                j--;
-            }
-            sorted[j] = value;
-        }
-        if (sorted[count / 2])
-            rate = 1e9 / (double)sorted[count / 2];
-    }
-    spo->target_fps = 120;
+/* The standard rate at or just above a measured one. */
+static double standard_rate(double rate) {
+    static const double standards[] = {30, 60, 120};
+    int i;
     if (rate <= 0)
-        spo->target_fps = 60;
-    else
-        for (i = 0; i < 3; i++)
-            if (rate <= targets[i] * 1.02) {
-                spo->target_fps = targets[i];
-                break;
-            }
+        return 60;
+    for (i = 0; i < 3; i++)
+        if (rate <= standards[i] * 1.02)
+            return standards[i];
+    return 120;
+}
+/* A colour change shows only after the new colour has held for a second. */
+static int debounce(int slot, int raw, uint64_t now) {
+    if (!spo->tone_ready[slot]) {
+        spo->tone_ready[slot] = 1;
+        spo->tone_shown[slot] = spo->tone_pending[slot] = SPO_TONE_VALUE;
+        spo->tone_since[slot] = now;
+    }
+    if (raw == spo->tone_shown[slot])
+        spo->tone_pending[slot] = (uint8_t)raw;
+    else if (raw != spo->tone_pending[slot]) {
+        spo->tone_pending[slot] = (uint8_t)raw;
+        spo->tone_since[slot] = now;
+    } else if (now - spo->tone_since[slot] >= SPO_HOLD_NS)
+        spo->tone_shown[slot] = (uint8_t)raw;
+    return spo->tone_shown[slot];
+}
+/* The reference follows the game's own rate unless the port named a target. */
+void spo_colours_step(uint64_t now) {
+    double reference = spo->host_target ? (double)spo->host_target : standard_rate(spo->fps);
+    if (spo->host_target) {
+        spo->target_fps = reference;
+        spo->target_locked = 1;
+        spo->target_candidate = 0;
+    } else if (spo->fps <= 0) {
+        if (!spo->target_locked)
+            spo->target_fps = 60;
+    } else if (!spo->target_locked) {
+        spo->target_fps = reference;
+        spo->target_locked = 1;
+    } else if (reference == spo->target_fps) {
+        spo->target_candidate = 0;
+    } else if (reference != spo->target_candidate) {
+        spo->target_candidate = reference;
+        spo->target_since = now;
+    } else if (now - spo->target_since >= SPO_HOLD_NS) {
+        uint64_t span = 0;
+        uint32_t frames = 0;
+        spo->target_fps = reference;
+        spo->target_candidate = 0;
+        /* The 1% low restarts from the frames of the last second and a half. */
+        while (frames < spo->history_count && span < UINT64_C(1500000000))
+            span += spo->intervals[(spo->history_next + SPO_HISTORY - 1 - frames++) % SPO_HISTORY];
+        spo->low_floor = spo->history_serial - frames;
+        spo->low_1 = 0;
+    }
+    debounce(0, spo->fps > 0 ? tone_ratio(spo->fps / reference) : SPO_TONE_VALUE, now);
+    debounce(1, spo->low_1 > 0 ? tone_ratio(spo->low_1 / reference) : SPO_TONE_VALUE, now);
+}
+static uint64_t median_of(const uint64_t *values, int count) {
+    uint64_t sorted[SPO_GRAPH_LAG];
+    int i, j;
+    for (i = 0; i < count; i++) {
+        uint64_t value = values[i];
+        for (j = i; j && sorted[j - 1] > value; j--)
+            sorted[j] = sorted[j - 1];
+        sorted[j] = value;
+    }
+    return sorted[count / 2];
+}
+/*
+ * One frame against the pace around it: a single long frame is a hitch, but a clean change of
+ * rate is not, because the frames on one side of it match.
+ */
+int spo_hitch_tone(uint64_t ns, const uint64_t *before, int before_count, const uint64_t *after,
+                   int after_count) {
+    uint64_t reference = 0;
+    double ratio;
+    if (before_count > 0)
+        reference = median_of(before, before_count);
+    if (after_count > 0) {
+        uint64_t next = median_of(after, after_count);
+        if (next > reference)
+            reference = next;
+    }
+    if (!reference || !ns || ns <= reference)
+        return SPO_TONE_GOOD;
+    ratio = (double)reference / (double)ns;
+    return ratio >= 0.9 ? SPO_TONE_GOOD : ratio >= 0.8 ? SPO_TONE_WARN : SPO_TONE_BAD;
 }
 
 static spo_row *new_row(const char *label) {
@@ -200,20 +238,20 @@ static void formatted(uint64_t now) {
         low = !!(spo->overlay.items & SPO_BIT(SPO_LOW_1));
     memcpy(previous, spo->rows, sizeof(previous));
     spo->row_count = 0;
-    update_target();
+    spo_colours_step(now);
     if (fps || time || low) {
         r = new_row("FPS");
         if (fps && spo->fps > 0)
-            put(r, 0, tone_rate(spo->fps), 5, "%.1f", spo->fps);
+            put(r, 0, spo->tone_shown[0], 5, "%.1f", spo->fps);
         else if (fps)
             put(r, 0, SPO_TONE_VALUE, 5, "--");
         if (time && spo->frame_ms > 0)
-            put(r, 1, spo->fps > 0 ? tone_rate(spo->fps) : SPO_TONE_VALUE, 8, "%.1f ms",
+            put(r, 1, spo->fps > 0 ? spo->tone_shown[0] : SPO_TONE_VALUE, 8, "%.1f ms",
                 spo->frame_ms);
         else if (time)
             put(r, 1, SPO_TONE_VALUE, 8, "-- ms");
         if (low && spo->low_1 > 0)
-            put(r, 2, tone_rate(spo->low_1), 8, "%.1f low", spo->low_1);
+            put(r, 2, spo->tone_shown[1], 8, "%.1f low", spo->low_1);
         else if (low)
             put(r, 2, SPO_TONE_VALUE, 8, "-- low");
     }
@@ -412,8 +450,24 @@ static int draw_row(const plan *p, const spo_row *r, int x, int y, uint8_t alpha
             return 0;
     return 1;
 }
-static const uint8_t *bar_color(uint64_t ns) {
-    return palette[ns ? tone_rate(1e9 / (double)ns) : SPO_TONE_GOOD];
+/* A bar takes the worse of its own hitch tone and the colour of the shown rate. */
+static int bar_tone(uint32_t at, uint64_t serial) {
+    uint64_t before[SPO_GRAPH_LAG], after[SPO_GRAPH_LAG];
+    int nb = 0, na = 0, k, tone;
+    uint64_t oldest = spo->history_serial - spo->history_count;
+    if (spo->bar_tone[at])
+        return spo->bar_tone[at];
+    for (k = SPO_GRAPH_LAG; k >= 1; k--)
+        if (serial > oldest + (uint64_t)k)
+            before[nb++] = spo->intervals[(at + SPO_HISTORY - (uint32_t)k) % SPO_HISTORY];
+    for (k = 1; k <= SPO_GRAPH_LAG; k++)
+        if (serial + (uint64_t)k <= spo->history_serial)
+            after[na++] = spo->intervals[(at + (uint32_t)k) % SPO_HISTORY];
+    tone = spo_hitch_tone(spo->intervals[at], before, nb, after, na);
+    if (spo->tone_shown[0] > tone && spo->tone_shown[0] >= SPO_TONE_GOOD)
+        tone = spo->tone_shown[0];
+    spo->bar_tone[at] = (uint8_t)tone;
+    return tone;
 }
 typedef struct {
     int size, cw, ch, padx, pady, bar, rowh, cols, w, h;
@@ -703,31 +757,35 @@ spo_result spo_layout(uint32_t width, uint32_t height) {
     spo->graph_rect = g;
 draw_graph:
     if (graph) {
-        uint32_t count = spo->history_count < spo->overlay.graph_samples
-                             ? spo->history_count
-                             : spo->overlay.graph_samples;
+        /* Bars trail the newest frame so that each can be judged against the frames after it. */
+        uint64_t drawable =
+            spo->history_serial > SPO_GRAPH_LAG ? spo->history_serial - SPO_GRAPH_LAG : 0;
+        uint32_t available =
+            spo->history_count > SPO_GRAPH_LAG ? spo->history_count - SPO_GRAPH_LAG : 0;
+        uint32_t count = available < spo->overlay.graph_samples ? available
+                                                                 : spo->overlay.graph_samples;
         spo->graph_max = 2000.0 / spo->target_fps;
         int rebuild = spo->graph_pixel_range != spo->graph_max || spo->graph_pixel_scale != g.h ||
-                      spo->graph_pixel_target != spo->target_fps ||
-                      spo->graph_serial > spo->history_serial ||
-                      spo->history_serial - spo->graph_serial > 120;
-        uint32_t updates = (uint32_t)(spo->history_serial - spo->graph_serial);
+                      spo->graph_serial > drawable || drawable - spo->graph_serial > 120;
+        uint32_t updates = (uint32_t)(drawable - spo->graph_serial);
         if (rebuild) {
             spo->graph_pixel_range = spo->graph_max;
             spo->graph_pixel_scale = g.h;
-            spo->graph_pixel_target = spo->target_fps;
             spo->graph_pixel_factor = (double)g.h / (spo->graph_max * 1e6);
             memset(spo->mesh.graph_data, 0, sizeof(spo->mesh.graph_data));
             spo->mesh.graph_head = 0;
             spo->mesh.graph_epoch++;
-            updates = spo->history_count < 120 ? spo->history_count : 120;
+            updates = available < 120 ? available : 120;
         }
         for (i = 0; i < updates; i++) {
-            uint32_t at = (spo->history_next + SPO_HISTORY - updates + i) % SPO_HISTORY;
+            uint64_t serial = drawable - updates + 1 + i;
+            uint32_t at = (uint32_t)((spo->history_next + SPO_HISTORY - 1 -
+                                      (spo->history_serial - serial)) %
+                                     SPO_HISTORY);
             uint64_t ns = spo->intervals[at];
             double height = (double)ns * spo->graph_pixel_factor;
             int pixels = height >= g.h ? g.h : height < 1 ? 1 : (int)ceil(height);
-            const uint8_t *color = bar_color(ns);
+            const uint8_t *color = palette[bar_tone(at, serial)];
             uint8_t *pixel = spo->mesh.graph_data[spo->mesh.graph_head];
             pixel[0] = (uint8_t)pixels;
             pixel[1] = color[0];
@@ -736,7 +794,7 @@ draw_graph:
             spo->mesh.graph_head = (spo->mesh.graph_head + 1) % 120;
             spo->mesh.graph_version++;
         }
-        spo->graph_serial = spo->history_serial;
+        spo->graph_serial = drawable;
         spo->mesh.graph_scale = (uint32_t)g.h;
         spo->mesh.graph_count = count;
         if (reuse_base && old_count && spo->graph_label_range == spo->graph_max &&
