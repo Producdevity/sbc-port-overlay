@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 use std::ffi::{c_char, c_void};
 type GetProc = unsafe extern "C" fn(*const c_char, *mut c_void) -> *mut c_void;
 type Pause = unsafe extern "C" fn(u32, *mut c_void);

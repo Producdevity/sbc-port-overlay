@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 FROM debian@sha256:268fb24c39bca92d326dd83ea3abebe4a3f7751c804ffef23bb6d857dd343ff8
 RUN rm -f '/etc/apt/sources.list.d/debian.sources' && \
     printf '%s\n' 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20250101T000000Z bookworm main' > /etc/apt/sources.list && \

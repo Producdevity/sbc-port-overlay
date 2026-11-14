@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Summarize an interleaved suite; GPU query deltas are estimates, not isolated timers."""
 import csv
 from pathlib import Path

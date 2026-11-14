@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Losslessly encode SDL's 24/32-bit BMP readback as PNG, without imaging deps."""
 from pathlib import Path
 import struct

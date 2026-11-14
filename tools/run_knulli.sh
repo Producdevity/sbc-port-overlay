@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 set -eu
 preset=${1:?preset 0..4 or suite required}
 mode=${2:-benchmark}

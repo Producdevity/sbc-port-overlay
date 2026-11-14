@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-License-Identifier: MIT */
 #ifndef SPO_DEMO_GL_DEFS_H
 #define SPO_DEMO_GL_DEFS_H
 #include <stddef.h>

@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 [package]
 name = "spo-example"
 version = "0.1.0"
 edition = "2024"
-license = "GPL-3.0-or-later"
+license = "MIT"
 build = "build.rs"

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Remove only the owned verification entry, preserving all other bytes."""
 from pathlib import Path, PurePosixPath
 import os

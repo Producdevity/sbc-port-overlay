@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-License-Identifier: MIT */
 #include "internal.h"
 #include <math.h>
 #include <stdarg.h>
@@ -524,7 +524,7 @@ static spo_result menu(uint32_t width, uint32_t height) {
                                spo->name,
                                spo->version,
                                spo->renderer_name,
-                               "GPL-3.0-or-later",
+                               "MIT",
                                "Spleen / BSD-2-Clause",
                                NULL};
         int row = 0;

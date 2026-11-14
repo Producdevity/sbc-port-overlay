@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 const std = @import("std");
 const spo = @cImport({ @cInclude("spo.h"); });
 pub fn main() !void {

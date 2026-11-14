@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 cmake_minimum_required(VERSION 3.20)
 project(sbc_port_overlay VERSION 0.1.0 LANGUAGES C)
 include(GNUInstallDirs)

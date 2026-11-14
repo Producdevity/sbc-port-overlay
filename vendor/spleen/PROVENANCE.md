@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: MIT -->
 # Spleen font
 
 - Upstream: [fcambus/spleen](https://github.com/fcambus/spleen).

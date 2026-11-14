@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-License-Identifier: MIT */
 #ifndef SPO_INTERNAL_H
 #define SPO_INTERNAL_H
 #include "spo.h"

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Convert the pinned Spleen ASCII subsets without a font-library dependency."""
 from pathlib import Path
 import hashlib

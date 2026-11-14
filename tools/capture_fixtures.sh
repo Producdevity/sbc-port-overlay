@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 set -eu
 host=${1:?SSH alias required}
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$host" sh -s <<'REMOTE'

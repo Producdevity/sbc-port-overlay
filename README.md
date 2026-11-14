@@ -69,4 +69,4 @@ To build ports for these devices with an AI coding agent, see the
 
 ## License
 
-GPL-3.0-or-later. The Spleen font is BSD-2-Clause.
+MIT. The Spleen font is BSD-2-Clause.
