@@ -26,3 +26,8 @@ Run the sampler tests under ThreadSanitizer when you change the sampler.
 
 `SPO_SSH_HOST=<host> tools/run_knulli.sh suite` measures each preset against
 an overlay-off run.
+
+Review screenshots: `suite capture` writes one BMP per preset and menu tab.
+`SPO_BACKDROP=<24-bit BMP>` draws an image behind the overlay and
+`SPO_DEMO_ARGS="--backdrop backdrop.bmp --simulate good --capture-after 3"`
+fixes the readings.

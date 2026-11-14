@@ -77,9 +77,8 @@ static void simulate_readings(int bad) {
     uint64_t now = spo_now();
     int i;
     for (i = SPO_SYSTEM_CPU; i < SPO_ITEM_COUNT; i++)
-        if (i != SPO_SELF_COST)
+        if (i != SPO_SELF_COST && (spo->available_items & SPO_BIT(i)))
             spo->metrics[i] = (spo_metric){bad ? worn[i] : normal[i], now, 1};
-    spo->available_items = SPO_BIT(SPO_ITEM_COUNT) - 1;
     spo->battery_charging = !bad;
 }
 /* Steady frames with a mild and a hard hitch, or a slow game, for review renders. */
@@ -92,8 +91,6 @@ static uint64_t simulated_interval(int bad, int frame) {
         return (uint64_t)38e6;
     if (at == 71)
         return (uint64_t)27e6;
-    if (at == 104)
-        return (uint64_t)45e6;
     return (uint64_t)((16.67 + jitter[(frame * 7) % 11]) * 1e6);
 }
 static GLuint backdrop_texture(const char *path) {

@@ -101,6 +101,8 @@ metadata > "$root/before.txt"
 sha256sum "$root/spo_demo" /usr/lib/libSDL2-2.0.so.0 >> "$root/before.txt"
 mkdir "$root/home" "$root/cache" "$root/config" "$root/captures"
 chmod +x "$root/spo_demo"
+read -r extra < "$root/args"
+case "$extra" in *[!A-Za-z0-9_.\ =-]*) exit 2;; esac
 set -- --seconds "$duration" --work "$work" --fps "$fps"
 if [ "$preset" = suite ]; then set -- "$@" --suite; else set -- "$@" --preset "$preset"; fi
 if [ "$mode" = capture ]; then
@@ -109,6 +111,8 @@ fi
 [ "$menu" = -1 ] || set -- "$@" --menu "$menu"
 [ "$uncapped" = 0 ] || set -- "$@" --uncapped
 [ "$maxitems" = 0 ] || set -- "$@" --max-items
+# shellcheck disable=SC2086
+[ -z "$extra" ] || set -- "$@" $extra
 suspended=1
 kill -STOP "$frontend"
 sleep 1

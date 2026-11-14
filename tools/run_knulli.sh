@@ -21,12 +21,18 @@ case "$fps" in 0|60) ;; *) exit 2;; esac
 [ "$preset" != suite ] || [ "$duration" -le 45 ] || exit 2
 package=$(mktemp -d "${TMPDIR:-/tmp}/spo-package.XXXXXX")
 cleanup_local() {
-    case "$package" in */spo-package.*) rm -f "${package:?}/spo_demo" "$package/knulli_run_remote.sh" "$package/params"; rmdir "$package";; esac
+    case "$package" in */spo-package.*) rm -f "${package:?}/spo_demo" "$package/knulli_run_remote.sh" "$package/params" "$package/args" "$package/backdrop.bmp"; rmdir "$package";; esac
 }
 trap cleanup_local EXIT HUP INT TERM
 cp "${SPO_DEMO_BINARY:-build-aarch64/spo_demo}" "$package/spo_demo"
 cp tools/knulli_run_remote.sh "$package/knulli_run_remote.sh"
 printf '%s %s %s %s %s %s %s %s\n' "$preset" "$mode" "$duration" "$menu" "$uncapped" "$maxitems" "$work" "$fps" > "$package/params"
+# SPO_DEMO_ARGS adds demo options; SPO_BACKDROP is a 24-bit BMP drawn behind the overlay.
+extra=${SPO_DEMO_ARGS:-}
+case "$extra" in *[!A-Za-z0-9_.\ =-]*) exit 2;; esac
+printf '%s\n' "$extra" > "$package/args"
+files="spo_demo knulli_run_remote.sh params args"
+if [ -n "${SPO_BACKDROP:-}" ]; then cp "$SPO_BACKDROP" "$package/backdrop.bmp"; files="$files backdrop.bmp"; fi
 remote='set -eu
 umask 077
 lock=/tmp/pm-device-lock
@@ -58,5 +64,5 @@ created=1
 printf "%s\n" "$owner" > "$root/owner"
 tar -xf - -C "$root"
 SPO_PREPARED=1 exec sh "$root/knulli_run_remote.sh"'
-COPYFILE_DISABLE=1 tar -C "$package" -cf - spo_demo knulli_run_remote.sh params |
+COPYFILE_DISABLE=1 tar -C "$package" -cf - $files |
     ssh -o BatchMode=yes -o ConnectTimeout=8 "${SPO_SSH_HOST:?set SPO_SSH_HOST to the device SSH host}" "$remote"
