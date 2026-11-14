@@ -69,7 +69,7 @@ uint32_t spo_preset_items(uint32_t p) {
     if (p == 3)
         mask |= SPO_BIT(SPO_GRAPH) | SPO_BIT(SPO_SYSTEM_CPU) | SPO_BIT(SPO_GPU_LOAD);
     if (p == 4)
-        mask = SPO_BIT(SPO_ITEM_COUNT) - 1;
+        mask = (SPO_BIT(SPO_ITEM_COUNT) - 1) & ~SPO_BIT(SPO_PROCESS_CPU);
     return mask;
 }
 void spo_apply_preset(uint32_t p) {
@@ -82,11 +82,11 @@ void spo_apply_preset(uint32_t p) {
 }
 /* The preset field names the preset the toggles match; custom is set when none matches. */
 void spo_overlay_sync(void) {
-    static const uint32_t sensors = SPO_BIT(SPO_SYSTEM_CPU) | SPO_BIT(SPO_PROCESS_CPU) |
+    static const uint32_t sensors = SPO_BIT(SPO_SYSTEM_CPU) |
                                     SPO_BIT(SPO_GPU_LOAD) | SPO_BIT(SPO_CPU_CLOCK) |
                                     SPO_BIT(SPO_GPU_CLOCK) | SPO_BIT(SPO_TEMPERATURE) |
                                     SPO_BIT(SPO_BATTERY) | SPO_BIT(SPO_RSS) |
-                                    SPO_BIT(SPO_MEM_AVAILABLE) | SPO_BIT(SPO_CHARGING);
+                                    SPO_BIT(SPO_RAM_USED) | SPO_BIT(SPO_CHARGING);
     uint32_t compared = ~(sensors & ~spo->available_items), p, i;
     uint32_t counters = SPO_BIT(spo->counter_count) - 1, indicators = SPO_BIT(spo->indicator_count) - 1;
     for (i = 0; i < 5; i++) {
@@ -121,6 +121,8 @@ spo_result spo_init(const spo_config *c) {
     spo->graph_serial = UINT64_MAX;
     spo->overlay =
         (spo_overlay_settings){sizeof(spo_overlay_settings), 0, 0, 0, 2, 65, 100, 120, 0};
+    spo->fps_low = spo->fps_config_low = 30;
+    spo->fps_high = spo->fps_config_high = 60;
     spo->stats.struct_size = sizeof(spo_stats);
     if (!spo_text_copy(spo->path, sizeof(spo->path), c->config_path) ||
         !spo_text_copy(spo->name, sizeof(spo->name), c->port_name) ||
@@ -173,11 +175,7 @@ void spo_reset_timing(void) {
     spo->graph_serial = UINT64_MAX;
     spo->graph_max = 33.333333;
     spo->graph_range_at = spo->graph_high_at = 0;
-    spo->target_locked = 0;
-    spo->target_candidate = 0;
-    spo->target_since = spo->low_floor = 0;
-    memset(spo->tone_ready, 0, sizeof(spo->tone_ready));
-    memset(spo->bar_tone, 0, sizeof(spo->bar_tone));
+    spo->tone_ready = 0;
     spo_metrics_reset();
 }
 spo_result spo_register_page(const spo_page_desc *d, spo_id *id) {
@@ -396,7 +394,7 @@ spo_result spo_overlay_set(const spo_overlay_settings *in) {
         in->anchor > 8 || in->font_scale < 1 || in->font_scale > 4 ||
         in->background_opacity > 100 || in->text_opacity < 10 || in->text_opacity > 100 ||
         in->graph_samples < 30 || in->graph_samples > 120 || in->graph_samples % 30 ||
-        in->items >= SPO_BIT(SPO_ITEM_COUNT))
+        in->items >= SPO_BIT(SPO_ITEM_COUNT) || (in->items & SPO_BIT(SPO_PROCESS_CPU)))
         return spo_fail(SPO_INVALID);
     if (in->items != spo->overlay.items) {
         spo_metrics_reset();
@@ -416,7 +414,8 @@ spo_result spo_target_fps_set(uint32_t fps) {
         return SPO_NOT_INITIALIZED;
     if (fps && (fps < 10 || fps > 1000))
         return spo_fail(SPO_INVALID);
-    spo->host_target = fps;
+    spo->fps_high = fps ? fps : spo->fps_config_high;
+    spo->fps_low = fps ? fps / 2 : spo->fps_config_low;
     spo->formatted_at = 0;
     return SPO_OK;
 }
@@ -438,11 +437,7 @@ void spo_numeric_refresh(uint64_t now) {
         spo->window_frames = 0;
         spo->refresh_stamp = now;
         {
-            uint32_t frames = spo->history_serial > spo->low_floor
-                                  ? (uint32_t)(spo->history_serial - spo->low_floor)
-                                  : 0;
-            if (frames > spo->history_count)
-                frames = spo->history_count;
+            uint32_t frames = spo->history_count;
             spo->low_1 = 0;
             if ((spo->overlay.items & SPO_BIT(SPO_LOW_1)) && frames >= 120) {
                 uint64_t worst[6] = {0};
@@ -475,7 +470,6 @@ spo_result spo_get_stats(spo_stats *out) {
 void spo_history_push(uint64_t interval) {
     spo->history_serial++;
     spo->intervals[spo->history_next] = interval;
-    spo->bar_tone[spo->history_next] = 0;
     spo->history_next = (spo->history_next + 1) % SPO_HISTORY;
     if (spo->history_count < SPO_HISTORY)
         spo->history_count++;

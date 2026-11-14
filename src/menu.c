@@ -23,10 +23,9 @@ static const show_item show_items[] = {
     {NULL, "Temperature", SPO_TEMPERATURE},
     {"GPU", "Load", SPO_GPU_LOAD},
     {NULL, "Clock", SPO_GPU_CLOCK},
-    {"Game", "CPU", SPO_PROCESS_CPU},
-    {NULL, "Memory", SPO_RSS},
-    {"System", "Free memory", SPO_MEM_AVAILABLE},
-    {NULL, "Battery", SPO_BATTERY},
+    {"Memory", "RAM", SPO_RAM_USED},
+    {NULL, "Game memory", SPO_RSS},
+    {"System", "Battery", SPO_BATTERY},
     {NULL, "Charging", SPO_CHARGING},
     {"Overlay", "Overlay cost", SPO_SELF_COST},
 };

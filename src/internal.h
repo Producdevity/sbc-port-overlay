@@ -98,11 +98,11 @@ typedef struct {
     int open, drain, tab, cursor, scroll;
     uint64_t intervals[SPO_HISTORY], last_stamp, window_ns, refresh_stamp, history_serial;
     uint32_t history_count, history_next, window_frames;
-    double fps, frame_ms, low_1, graph_max, target_fps, target_candidate;
-    uint32_t host_target;
-    uint64_t target_since, low_floor, tone_since[2];
-    uint8_t tone_shown[2], tone_pending[2], bar_tone[SPO_HISTORY];
-    int target_locked, tone_ready[2];
+    double fps, frame_ms, low_1, graph_max;
+    uint32_t fps_low, fps_high, fps_config_low, fps_config_high;
+    uint64_t tone_since;
+    uint8_t tone_shown, tone_pending;
+    int tone_ready;
     uint64_t graph_high_at;
     spo_sampler *sampler;
     uint32_t sampling_sequence, requested_items, available_items;
@@ -128,7 +128,7 @@ typedef struct {
     uint64_t graph_serial;
     double graph_pixel_range, graph_pixel_factor;
     int graph_pixel_scale;
-    double graph_label_range, graph_label_target;
+    double graph_label_range, graph_label_high;
     char graph_label[32];
     uint64_t formatted_at, format_checked_at;
     spo_overlay_settings formatted_settings;
@@ -209,8 +209,6 @@ spo_result spo_backend_init(void);
 void spo_backend_shutdown(void);
 spo_result spo_backend_draw(const spo_mesh *, uint32_t, uint32_t, uint32_t *);
 #define SPO_HOLD_NS UINT64_C(1000000000)
-#define SPO_GRAPH_LAG 4
 void spo_history_push(uint64_t);
 void spo_colours_step(uint64_t);
-int spo_hitch_tone(uint64_t, const uint64_t *, int, const uint64_t *, int);
 #endif

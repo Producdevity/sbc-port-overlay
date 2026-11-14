@@ -11,7 +11,7 @@
 static const char *const keys[SPO_ITEM_COUNT] = {
     "fps",         "frame_time", "graph",         "low_1",     "system_cpu",
     "process_cpu", "gpu_load",   "cpu_clock",     "gpu_clock", "temperature",
-    "battery",     "rss",        "mem_available", "self_cost", "charging"};
+    "battery",     "rss",        "ram",       "self_cost", "charging"};
 static const char *const anchors[] = {"top_left",    "top_center",    "top_right",
                                       "center_left", "center",        "center_right",
                                       "bottom_left", "bottom_center", "bottom_right"};
@@ -150,6 +150,15 @@ spo_result spo_config_load(void) {
         spo->overlay.graph_samples = 120;
         spo->error = SPO_INVALID;
     }
+    spo->fps_config_low = get_range("fps_low", 30, 1, 1000);
+    spo->fps_config_high = get_range("fps_high", 60, 1, 1000);
+    if (spo->fps_config_low >= spo->fps_config_high) {
+        spo->fps_config_low = 30;
+        spo->fps_config_high = 60;
+        spo->error = SPO_INVALID;
+    }
+    spo->fps_low = spo->fps_config_low;
+    spo->fps_high = spo->fps_config_high;
     a = entry("spo", "anchor");
     if (a) {
         for (i = 0; i < 9; i++)
@@ -163,6 +172,8 @@ spo_result spo_config_load(void) {
     if (spo->overlay.custom)
         for (i = 0; i < SPO_ITEM_COUNT; i++) {
             int32_t value;
+            if (i == SPO_PROCESS_CPU)
+                continue;
             if (i == SPO_CHARGING && !spo_ini_has("spo.items", keys[i]))
                 value = !!(spo->overlay.items & SPO_BIT(SPO_BATTERY));
             else if (!spo_ini_get("spo.items", keys[i], &value))
@@ -189,10 +200,12 @@ static int snapshot(void) {
         !spo_ini_put("spo", "font_scale", (int32_t)o->font_scale) ||
         !spo_ini_put("spo", "background_opacity", (int32_t)o->background_opacity) ||
         !spo_ini_put("spo", "text_opacity", (int32_t)o->text_opacity) ||
-        !spo_ini_put("spo", "graph_samples", (int32_t)o->graph_samples))
+        !spo_ini_put("spo", "graph_samples", (int32_t)o->graph_samples) ||
+        !spo_ini_put("spo", "fps_low", (int32_t)spo->fps_config_low) ||
+        !spo_ini_put("spo", "fps_high", (int32_t)spo->fps_config_high))
         return 0;
     for (i = 0; i < SPO_ITEM_COUNT; i++)
-        if (!spo_ini_put("spo.items", keys[i], !!(o->items & SPO_BIT(i))))
+        if (i != SPO_PROCESS_CPU && !spo_ini_put("spo.items", keys[i], !!(o->items & SPO_BIT(i))))
             return 0;
     for (i = 0; i < spo->counter_count; i++)
         if (!spo_ini_put("spo.counters", spo->counters[i].key, !!(spo->counter_mask & SPO_BIT(i))))

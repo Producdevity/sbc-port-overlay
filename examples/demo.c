@@ -67,13 +67,13 @@ static size_t warm_cpu_count;
 /* Fixed readings for review renders; the overlay is otherwise fed by the sampler. */
 static void simulate_readings(int bad) {
     static const double normal[SPO_ITEM_COUNT] = {
-        [SPO_SYSTEM_CPU] = 34,  [SPO_PROCESS_CPU] = 21, [SPO_GPU_LOAD] = 62,
+        [SPO_SYSTEM_CPU] = 34,  [SPO_GPU_LOAD] = 62,
         [SPO_CPU_CLOCK] = 1512, [SPO_GPU_CLOCK] = 648,  [SPO_TEMPERATURE] = 52,
-        [SPO_BATTERY] = 87,     [SPO_RSS] = 412,        [SPO_MEM_AVAILABLE] = 503, [SPO_CHARGING] = 1};
+        [SPO_BATTERY] = 87,     [SPO_RSS] = 412,        [SPO_RAM_USED] = 503, [SPO_CHARGING] = 1};
     static const double worn[SPO_ITEM_COUNT] = {
-        [SPO_SYSTEM_CPU] = 97,  [SPO_PROCESS_CPU] = 88, [SPO_GPU_LOAD] = 89,
+        [SPO_SYSTEM_CPU] = 97,  [SPO_GPU_LOAD] = 89,
         [SPO_CPU_CLOCK] = 1008, [SPO_GPU_CLOCK] = 360,  [SPO_TEMPERATURE] = 83,
-        [SPO_BATTERY] = 8,      [SPO_RSS] = 702,        [SPO_MEM_AVAILABLE] = 41, [SPO_CHARGING] = 0};
+        [SPO_BATTERY] = 8,      [SPO_RSS] = 702,        [SPO_RAM_USED] = 41, [SPO_CHARGING] = 0};
     uint64_t now = spo_now();
     int i;
     for (i = SPO_SYSTEM_CPU; i < SPO_ITEM_COUNT; i++)
@@ -312,7 +312,7 @@ int main(int argc, char **argv) {
     char capture_path[4096];
     GLuint program = 0, buffer = 0, vs = 0, fs = 0;
     GLint time_uniform, work_uniform, palette_uniform;
-    spo_id page, counter, indicator;
+    spo_id page, counter;
     const GLfloat triangle[] = {-1, -1, 3, -1, -1, 3};
     spo_config config = {0};
     void (*GenQueries)(GLsizei, GLuint *) = NULL, (*DeleteQueries)(GLsizei, const GLuint *) = NULL;
@@ -476,7 +476,7 @@ int main(int argc, char **argv) {
         spo_id option;
         const char *choices[] = {"Ocean", "Forest", "Amber"};
         spo_counter_desc c = {sizeof(c), "objects", "OBJECTS", "", 0};
-        spo_indicator_desc ind = {sizeof(ind), "shaders", "SHADERS"};
+        spo_indicator_desc ind = {sizeof(ind), NULL, NULL};
         if (spo_register_page(&p, &page) != SPO_OK)
             goto done;
         o.struct_size = sizeof(o);
@@ -519,8 +519,7 @@ int main(int argc, char **argv) {
         o.on_action = scene_reset;
         o.help = "Restart the scene animation";
         if (spo_register_option(&o, &option) != SPO_OK ||
-            spo_register_counter(&c, &counter) != SPO_OK ||
-            spo_register_indicator(&ind, &indicator) != SPO_OK)
+            spo_register_counter(&c, &counter) != SPO_OK)
             goto done;
         if (maxitems)
             for (i = 1; i < 8; i++) {
@@ -543,7 +542,6 @@ int main(int argc, char **argv) {
             }
     }
     spo_counter_set(counter, 24);
-    spo_indicator_set(indicator, 0);
     if (size) {
         spo_overlay_settings overlay = {sizeof(overlay)};
         spo_overlay_get(&overlay);
@@ -762,8 +760,7 @@ int main(int argc, char **argv) {
         a = seconds(CLOCK_THREAD_CPUTIME_ID);
         b = seconds(CLOCK_MONOTONIC);
         spo_counter_set(counter, 24);
-        spo_indicator_set(indicator, 0);
-        if (simulate >= 0) {
+            if (simulate >= 0) {
             simulate_readings(simulate);
             spo->last_stamp = spo_now() - simulated_interval(simulate, ++frame_number);
         }

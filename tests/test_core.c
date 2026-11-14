@@ -323,8 +323,9 @@ static void parsers(void) {
             "42 (name (odd) )) R 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21", &a, &b) &&
         a == 23 && b == 21);
     assert(!spo_parse_process("42 (name) R 1 2", &a, &b));
-    assert(spo_parse_mem("MemFree: 1 kB\nMemAvailable: 131072 kB\n", &d) && d == 128);
-    assert(!spo_parse_mem("MemAvailable: 10 MB\n", &d));
+    assert(spo_parse_mem("MemTotal: 262144 kB\nMemFree: 1 kB\nMemAvailable: 131072 kB\n", &d) && d == 128);
+    assert(!spo_parse_mem("MemTotal: 10 kB\nMemAvailable: 10 MB\n", &d));
+    assert(!spo_parse_mem("MemAvailable: 10 kB\n", &d));
     assert(!spo_parse_mem("MemFree: 1024 kB\n", &d));
     assert(spo_parse_number(" 42\n", &d) && d == 42);
     assert(!spo_parse_number("nan", &d));
@@ -469,7 +470,7 @@ static void persistence(void) {
     int32_t value;
     spo_config c;
     const char *ini = "[spo]\npreset=3\ncustom=1\nanchor=bottom_right\n[spo.items]\nprocess_cpu="
-                      "1\nbattery=1\n[port.graphics]\nscale=75\n[future]\nretain=yes\n";
+                      "1\nrss=1\nmem_available=1\nbattery=1\n[port.graphics]\nscale=75\n[future]\nretain=yes\n";
     assert(fd >= 0);
     assert(write(fd, ini, strlen(ini)) == (ssize_t)strlen(ini));
     close(fd);
@@ -480,7 +481,8 @@ static void persistence(void) {
     id = register_setting();
     assert(change_calls == 1);
     assert(spo_option_get(id, &value) == SPO_OK && value == 75);
-    assert(spo->overlay.anchor == 8 && spo->overlay.items & SPO_BIT(SPO_PROCESS_CPU));
+    assert(spo->overlay.anchor == 8 && spo->overlay.items & SPO_BIT(SPO_RSS));
+    assert(!(spo->overlay.items & SPO_BIT(SPO_PROCESS_CPU)) && !(spo->overlay.items & SPO_BIT(SPO_RAM_USED)));
     assert(spo->overlay.items & SPO_BIT(SPO_CHARGING));
     reject = 1;
     assert(spo_option_set(id, 80) == SPO_REJECTED);
@@ -602,50 +604,38 @@ static void graph_cache(void) {
     free(saved);
 }
 static void graph_ring(void) {
-    static const uint8_t red[3] = {255, 90, 82}, green[3] = {98, 214, 126};
+    static const uint8_t green[3] = {98, 214, 126};
     reset();
     spo_overlay_settings settings = spo->overlay;
     settings.items = SPO_BIT(SPO_GRAPH);
     assert(spo_overlay_set(&settings) == SPO_OK);
-    push_frames(16666000, 124, 0);
+    push_frames(16666000, 120, 0);
     spo->graph_range_at = spo_now();
     assert(spo_layout(640, 480) == SPO_OK);
     uint32_t epoch = spo->mesh.graph_epoch, version = spo->mesh.graph_version;
     uint32_t revision = spo->mesh.revision;
-    uint8_t first[4];
-    memcpy(first, spo->mesh.graph_data[0], 4);
+    uint8_t previous[120][4];
+    memcpy(previous, spo->mesh.graph_data, sizeof(previous));
     /* A frame near the target reaches about half of the graph height. */
-    assert(first[0] >= spo->mesh.graph_scale * 2 / 5 && first[0] <= spo->mesh.graph_scale * 3 / 5);
+    assert(previous[0][0] >= spo->mesh.graph_scale * 2 / 5 && previous[0][0] <= spo->mesh.graph_scale * 3 / 5);
     assert(spo->mesh.graph_count == 120);
-    /* Bars trail the newest frame by four, so each is judged against the frames after it. */
+    /* The graph is one colour, and a long frame is only a taller bar. */
     push_frames(25000000, 1, 1);
     assert(spo->mesh.graph_epoch == epoch && spo->mesh.graph_version == version + 1);
     assert(spo->mesh.graph_head == 1 && spo->mesh.revision == revision);
-    push_frames(16666000, 3, 1);
-    assert(spo->mesh.graph_head == 4 && spo->mesh.graph_data[3][0] < first[0] * 3 / 2 &&
-           spo->mesh.graph_data[3][1] == green[0]);
-    push_frames(16666000, 1, 1);
-    assert(spo->mesh.graph_head == 5 && spo->mesh.graph_data[4][0] > first[0] + 3);
-    assert(!memcmp(spo->mesh.graph_data[4] + 1, red, 3));
-    assert(spo->mesh.graph_epoch == epoch);
+    assert(spo->mesh.graph_data[0][0] > previous[0][0] + 3);
+    assert(!memcmp(previous + 1, spo->mesh.graph_data + 1, 119 * 4));
     push_frames(16666000, 600, 1);
     assert(spo->mesh.graph_epoch == epoch);
     for (int i = 0; i < 120; i++)
         assert(!memcmp(spo->mesh.graph_data[i] + 1, green, 3));
-    push_frames(UINT64_MAX, 1, 0);
-    push_frames(16666000, 3, 1);
-    spo->graph_range_at = spo_now();
-    push_frames(16666000, 1, 1);
-    {
-        uint32_t newest = (spo->mesh.graph_head + 119) % 120;
-        assert(spo->mesh.graph_data[newest][0] == 28);
-        assert(!memcmp(spo->mesh.graph_data[newest] + 1, red, 3));
-    }
+    push_frames(UINT64_MAX, 1, 1);
+    assert(spo->mesh.graph_data[(spo->mesh.graph_head + 119) % 120][0] == 28);
     settings.font_scale = 3;
     assert(spo_overlay_set(&settings) == SPO_OK);
     assert(spo_layout(640, 480) == SPO_OK);
     assert(spo->mesh.graph_epoch != epoch && spo->mesh.graph_scale == 42);
-    assert(spo->mesh.graph_data[0][0] > first[0]);
+    assert(spo->mesh.graph_data[0][0] > previous[0][0]);
     spo_reset_timing();
     assert(spo_layout(640, 480) == SPO_OK && !spo->mesh.graph_count);
     for (int i = 0; i < 120; i++)
@@ -675,144 +665,64 @@ static void feed(double fps, int half_seconds) {
         clock_ns += UINT64_C(500000000);
         spo->fps = fps;
         spo_colours_step(clock_ns);
-        if (spo->tone_shown[0] > worst)
-            worst = spo->tone_shown[0];
+        if (spo->tone_shown > worst)
+            worst = spo->tone_shown;
     }
 }
 static void colour_changes(void) {
     reset();
+    assert(spo->fps_low == 30 && spo->fps_high == 60);
     clock_ns = UINT64_C(1000000000);
     worst = 0;
     /* Nothing is coloured until a colour has held for a second. */
     feed(59.94, 1);
-    assert(spo->tone_shown[0] == SPO_TONE_VALUE && spo->target_fps == 60);
+    assert(spo->tone_shown == SPO_TONE_VALUE);
     feed(59.94, 4);
-    assert(spo->tone_shown[0] == SPO_TONE_GOOD);
-    /* A clean 60 -> 30 -> 60 change, as in a cutscene, never shows yellow or red. */
+    assert(spo->tone_shown == SPO_TONE_GOOD);
+    /* Fixed thresholds: yellow from just under 60, red under 30; 2% short still counts. */
+    feed(58.9, 4);
+    assert(spo->tone_shown == SPO_TONE_GOOD);
+    feed(55, 4);
+    assert(spo->tone_shown == SPO_TONE_WARN);
+    feed(30, 4);
+    assert(spo->tone_shown == SPO_TONE_WARN);
+    feed(29.5, 4);
+    assert(spo->tone_shown == SPO_TONE_WARN);
+    feed(25, 4);
+    assert(spo->tone_shown == SPO_TONE_BAD);
+    feed(120, 4);
+    assert(spo->tone_shown == SPO_TONE_GOOD);
+    /* A one-window dip, as when the game changes rate, is never shown. */
+    worst = 0;
+    feed(59.94, 4);
     for (int round = 0; round < 3; round++) {
         feed(45, 1);
-        feed(30, 1);
-        assert(spo->target_fps == 60);
-        feed(30, 8);
-        assert(spo->target_fps == 30 && spo->tone_shown[0] == SPO_TONE_GOOD);
-        feed(45, 1);
-        feed(59.94, 1);
-        assert(spo->target_fps == 30);
-        feed(59.94, 8);
-        assert(spo->target_fps == 60 && spo->tone_shown[0] == SPO_TONE_GOOD);
+        feed(59.94, 3);
     }
     assert(worst == SPO_TONE_GOOD);
-    /* A target only changes after the new rate has held for a second. */
-    feed(30, 1);
-    assert(spo->target_fps == 60);
-    feed(59.94, 1);
-    feed(30, 1);
-    feed(30, 1);
-    assert(spo->target_fps == 60);
-    feed(30, 3);
-    assert(spo->target_fps == 30);
-    spo->low_floor = 0;
-    feed(59.94, 8);
-    assert(spo->target_fps == 60 && spo->tone_shown[0] == SPO_TONE_GOOD);
-    /* A rate below the target is yellow, then red, once it has held for a second. */
-    worst = 0;
-    feed(55, 1);
-    assert(spo->tone_shown[0] == SPO_TONE_GOOD);
-    feed(55, 3);
-    assert(spo->tone_shown[0] == SPO_TONE_WARN);
-    feed(50, 1);
-    assert(spo->tone_shown[0] == SPO_TONE_WARN);
-    feed(50, 3);
-    assert(spo->tone_shown[0] == SPO_TONE_BAD && spo->target_fps == 60);
-    feed(59.94, 3);
-    assert(spo->tone_shown[0] == SPO_TONE_GOOD);
-    /* The target a port names is never switched, so a slow game stays red. */
+    /* A port that names its target moves both thresholds; 0 restores them. */
     assert(spo_target_fps_set(5) == SPO_INVALID && spo_target_fps_set(2000) == SPO_INVALID);
-    assert(spo_target_fps_set(60) == SPO_OK);
-    feed(30, 12);
-    assert(spo->target_fps == 60 && spo->tone_shown[0] == SPO_TONE_BAD);
-    assert(spo_target_fps_set(0) == SPO_OK);
-    feed(30, 8);
-    assert(spo->target_fps == 30 && spo->tone_shown[0] == SPO_TONE_GOOD);
-    assert(spo_target_fps_set(30) == SPO_OK);
-    feed(59.94, 8);
-    assert(spo->target_fps == 30 && spo->tone_shown[0] == SPO_TONE_GOOD);
-    /* The 1% low restarts when the rate changes, so it does not stay red after 30 -> 60. */
-    assert(spo_target_fps_set(0) == SPO_OK);
-    reset();
-    clock_ns = UINT64_C(1000000000);
-    spo->overlay.items |= SPO_BIT(SPO_LOW_1);
-    push_frames(33333000, 200, 0);
-    spo->low_1 = 30;
-    feed(30, 6);
-    assert(spo->target_fps == 30 && spo->tone_shown[1] == SPO_TONE_GOOD);
-    push_frames(16666000, 60, 0);
-    feed(59.94, 1);
-    spo->low_1 = 30;
-    feed(59.94, 1);
-    assert(spo->target_fps == 30 && spo->low_floor == 0);
-    feed(59.94, 1);
-    assert(spo->target_fps == 60 && spo->low_floor > 100 && spo->low_1 == 0);
-    assert(spo->tone_shown[1] != SPO_TONE_BAD);
+    assert(spo_target_fps_set(120) == SPO_OK && spo->fps_low == 60 && spo->fps_high == 120);
+    feed(59.94, 4);
+    assert(spo->tone_shown == SPO_TONE_WARN);
+    assert(spo_target_fps_set(30) == SPO_OK && spo->fps_low == 15 && spo->fps_high == 30);
+    feed(29.97, 4);
+    assert(spo->tone_shown == SPO_TONE_GOOD);
+    assert(spo_target_fps_set(0) == SPO_OK && spo->fps_low == 30 && spo->fps_high == 60);
 }
-static void hitches(void) {
-    const uint64_t fast[4] = {16666000, 16666000, 16666000, 16666000},
-                   slow[4] = {33333000, 33333000, 33333000, 33333000};
-    /* A single long frame is red; a frame that matches the frames around it is not. */
-    assert(spo_hitch_tone(40000000, fast, 4, fast, 4) == SPO_TONE_BAD);
-    assert(spo_hitch_tone(20500000, fast, 4, fast, 4) == SPO_TONE_WARN);
-    assert(spo_hitch_tone(17500000, fast, 4, fast, 4) == SPO_TONE_GOOD);
-    assert(spo_hitch_tone(16666000, fast, 4, fast, 4) == SPO_TONE_GOOD);
-    /* A clean change of rate has no hitch on either side of it. */
-    assert(spo_hitch_tone(33333000, fast, 4, slow, 4) == SPO_TONE_GOOD);
-    assert(spo_hitch_tone(16666000, fast, 4, slow, 4) == SPO_TONE_GOOD);
-    assert(spo_hitch_tone(33333000, slow, 4, fast, 4) == SPO_TONE_GOOD);
-    assert(spo_hitch_tone(16666000, slow, 4, fast, 4) == SPO_TONE_GOOD);
-    assert(spo_hitch_tone(50000000, slow, 4, slow, 4) == SPO_TONE_BAD);
-    assert(spo_hitch_tone(40000000, NULL, 0, NULL, 0) == SPO_TONE_GOOD);
-    /* In a drawn graph, a 60 -> 30 -> 60 cutscene colours no bar. */
-    {
-        static const uint8_t green[3] = {98, 214, 126};
-        reset();
-        spo_overlay_settings settings = spo->overlay;
-        settings.items = SPO_BIT(SPO_GRAPH);
-        assert(spo_overlay_set(&settings) == SPO_OK);
-        push_frames(16666000, 60, 0);
-        push_frames(33333000, 40, 0);
-        push_frames(16666000, 60, 0);
-        spo->graph_range_at = spo_now();
-        assert(spo_layout(640, 480) == SPO_OK);
-        for (int i = 0; i < 120; i++)
-            assert(!memcmp(spo->mesh.graph_data[i] + 1, green, 3));
-    }
-}
-static void graph_keeps_colours(void) {
-    uint8_t before[120][4];
-    reset();
-    spo_overlay_settings settings = spo->overlay;
-    settings.items = SPO_BIT(SPO_GRAPH);
-    assert(spo_overlay_set(&settings) == SPO_OK);
-    push_frames(16666000, 60, 0);
-    push_frames(40000000, 1, 0);
-    push_frames(16666000, 63, 0);
-    spo->graph_range_at = spo_now();
-    assert(spo_layout(640, 480) == SPO_OK);
-    memcpy(before, spo->mesh.graph_data, sizeof(before));
-    {
-        int red = 0;
-        for (int i = 0; i < 120; i++)
-            red += before[i][1] == 255 && before[i][2] == 90;
-        assert(red == 1);
-    }
-    /* A new target moves the scale, not the colours of the bars already drawn. */
-    assert(spo_target_fps_set(30) == SPO_OK);
-    spo->formatted_at = 0;
-    assert(spo_layout(640, 480) == SPO_OK);
-    assert(spo->target_fps == 30);
-    for (int i = 0; i < 120; i++) {
-        assert(!memcmp(before[i] + 1, spo->mesh.graph_data[i] + 1, 3));
-        assert(spo->mesh.graph_data[i][0] < before[i][0]);
-    }
+static void thresholds_from_config(void) {
+    char path[] = "/tmp/spo-fps-XXXXXX";
+    int fd = mkstemp(path);
+    spo_config c = config(path);
+    const char *text = "[spo]\nfps_low=40\nfps_high=90\n";
+    spo_shutdown();
+    assert(fd >= 0 && write(fd, text, strlen(text)) == (ssize_t)strlen(text));
+    close(fd);
+    assert(spo_init(&c) == SPO_OK && spo->fps_low == 40 && spo->fps_high == 90);
+    assert(spo_target_fps_set(60) == SPO_OK && spo->fps_low == 30);
+    assert(spo_target_fps_set(0) == SPO_OK && spo->fps_low == 40 && spo->fps_high == 90);
+    spo_shutdown();
+    unlink(path);
 }
 static void colours(void) {
     reset();
@@ -823,21 +733,19 @@ static void colours(void) {
     spo->fps = 59.94;
     spo->frame_ms = 16.7;
     relayout();
-    assert(find_row("FPS")->tone[0] == spo->tone_shown[0] &&
-           find_row("FPS")->tone[1] == spo->tone_shown[0] &&
-           find_row("FPS")->tone[2] == spo->tone_shown[1]);
+    assert(find_row("FPS")->tone[0] == spo->tone_shown);
+    assert(find_row("FPS")->tone[1] == SPO_TONE_VALUE && find_row("FPS")->tone[2] == SPO_TONE_VALUE);
     {
-        static const double load[] = {84, 85, 94, 95}, heat[] = {69, 70, 79, 80},
-                            charge[] = {21, 20, 11, 10};
+        static const double load[] = {59, 60, 89, 90};
         static const int ladder[] = {SPO_TONE_VALUE, SPO_TONE_WARN, SPO_TONE_WARN, SPO_TONE_BAD};
         for (int i = 0; i < 4; i++) {
             spo->metrics[SPO_SYSTEM_CPU].value = spo->metrics[SPO_GPU_LOAD].value = load[i];
-            spo->metrics[SPO_TEMPERATURE].value = heat[i];
-            spo->metrics[SPO_BATTERY].value = charge[i];
+            spo->metrics[SPO_TEMPERATURE].value = 95;
+            spo->metrics[SPO_BATTERY].value = 3;
             relayout();
             assert(find_row("CPU")->tone[0] == ladder[i] && find_row("GPU")->tone[0] == ladder[i]);
-            assert(find_row("CPU")->tone[2] == ladder[i]);
-            assert(find_row("BAT")->tone[0] == ladder[i]);
+            assert(find_row("CPU")->tone[2] == SPO_TONE_VALUE);
+            assert(find_row("BAT")->tone[0] == SPO_TONE_VALUE);
         }
     }
     spo->battery_charging = 1;
@@ -848,11 +756,35 @@ static void colours(void) {
     assert(!strcmp(find_row("BAT")->cell[1], "CHG") && find_row("BAT")->tone[1] == SPO_TONE_DIM);
     assert(find_row("OVERLAY")->tone[0] == SPO_TONE_DIM && !find_row("DRAW") && !find_row("SELF"));
 }
+static void graph_colour(void) {
+    static const uint8_t green[3] = {98, 214, 126};
+    uint8_t before[120][4];
+    reset();
+    spo_overlay_settings settings = spo->overlay;
+    settings.items = SPO_BIT(SPO_GRAPH);
+    assert(spo_overlay_set(&settings) == SPO_OK);
+    push_frames(16666000, 60, 0);
+    push_frames(40000000, 1, 0);
+    push_frames(16666000, 59, 0);
+    spo->graph_range_at = spo_now();
+    assert(spo_layout(640, 480) == SPO_OK);
+    memcpy(before, spo->mesh.graph_data, sizeof(before));
+    for (int i = 0; i < 120; i++)
+        assert(!memcmp(before[i] + 1, green, 3));
+    /* The target moves the scale and the line, not the colour. */
+    assert(spo_target_fps_set(30) == SPO_OK);
+    spo->formatted_at = 0;
+    assert(spo_layout(640, 480) == SPO_OK);
+    for (int i = 0; i < 120; i++) {
+        assert(!memcmp(before[i] + 1, spo->mesh.graph_data[i] + 1, 3));
+        assert(spo->mesh.graph_data[i][0] < before[i][0]);
+    }
+}
 static void sample_metrics(void) {
     static const double values[SPO_ITEM_COUNT] = {
-        [SPO_SYSTEM_CPU] = 3,  [SPO_PROCESS_CPU] = 6,    [SPO_CPU_CLOCK] = 1512,
+        [SPO_SYSTEM_CPU] = 3,  [SPO_CPU_CLOCK] = 1512,
         [SPO_GPU_CLOCK] = 360, [SPO_TEMPERATURE] = 42,   [SPO_BATTERY] = 94,
-        [SPO_RSS] = 44,        [SPO_MEM_AVAILABLE] = 796, [SPO_CHARGING] = 1};
+        [SPO_RSS] = 44,        [SPO_RAM_USED] = 796, [SPO_CHARGING] = 1};
     for (int i = SPO_SYSTEM_CPU; i <= SPO_CHARGING; i++)
         if (i != SPO_GPU_LOAD)
             spo->metrics[i] = (spo_metric){values[i], spo_now(), 1};
@@ -896,16 +828,20 @@ static void layouts(void) {
             assert(spo->row_count == 1 && !strcmp(spo->rows[0].cell[0], "60.0") &&
                    !strcmp(spo->rows[0].cell[1], "16.7 ms"));
         if (preset == 3)
-            assert(find_row("FPS") && find_row("CPU") && !find_row("RAM") && !find_row("GAME") &&
+            assert(find_row("FPS") && find_row("CPU") && !find_row("RAM") && !find_row("PROC") &&
                    !strcmp(find_row("CPU")->cell[0], "3%") && !find_row("CPU")->cell[1][0]);
         if (preset == 4) {
             assert(!strcmp(find_row("CPU")->cell[0], "3%") &&
                    !strcmp(find_row("CPU")->cell[1], "1512 MHz") &&
                    !strcmp(find_row("CPU")->cell[2], "42 C"));
             assert(!strcmp(find_row("GPU")->cell[1], "360 MHz") && !find_row("GPU")->cell[0][0]);
-            assert(!strcmp(find_row("GAME")->cell[0], "6%") &&
-                   !strcmp(find_row("GAME")->cell[1], "44 MB"));
-            assert(!strcmp(find_row("RAM")->cell[0], "796 MB free"));
+            assert(!strcmp(find_row("PROC")->cell[0], "44 MB"));
+            assert(!strcmp(find_row("RAM")->cell[0], "796 MB"));
+            /* MangoHud's order: GPU, CPU, RAM, PROC, BAT, then FPS, with the graph under it. */
+            assert(find_row("GPU") < find_row("CPU") && find_row("CPU") < find_row("RAM") &&
+                   find_row("RAM") < find_row("PROC") && find_row("PROC") < find_row("BAT") &&
+                   find_row("BAT") < find_row("FPS") && find_row("FPS") < find_row("OVERLAY"));
+            assert(spo->header_rows == (uint32_t)(find_row("FPS") - spo->rows) + 1);
             assert(!strcmp(find_row("BAT")->cell[0], "94%") &&
                    !strcmp(find_row("BAT")->cell[1], "CHG"));
             assert(!strcmp(find_row("DRAWS")->cell[0], "1") &&
@@ -972,8 +908,8 @@ int main(void) {
     maximal_layout();
     colours();
     colour_changes();
-    hitches();
-    graph_keeps_colours();
+    thresholds_from_config();
+    graph_colour();
     layouts();
     menu_layout();
     malformed_config();

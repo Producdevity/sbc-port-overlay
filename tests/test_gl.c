@@ -434,10 +434,10 @@ int main(int argc, char **argv) {
         assert(stats.draw_calls == 1);
     }
     {
-        /* Counter rows follow the FPS row: labels start 16 px apart at the default size. */
-        check_glyph(2, 'F', 12, 12);
-        check_glyph(2, 'C', 12, 28);
-        check_glyph(2, 'S', 12, 12 + 16 * 9);
+        /* Counters, indicators, then FPS: labels start 16 px apart at the default size. */
+        check_glyph(2, 'C', 12, 12);
+        check_glyph(2, 'S', 12, 12 + 16 * 8);
+        check_glyph(2, 'F', 12, 12 + 16 * 16);
     }
     assert(frame(640, 480) == SPO_OK);
     assert(draw_calls == 1 && upload_calls == 0);
@@ -464,12 +464,11 @@ int main(int argc, char **argv) {
     glReadPixels(137, 480 - 18 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
     assert(pixel[0] < 130 && pixel[1] < 130);
     spo->intervals[60] = 100000000;
-    spo->bar_tone[60] = 0;
     spo->graph_serial = UINT64_MAX;
     spo->last_stamp = 0;
     assert(frame(640, 480) == SPO_OK);
-    glReadPixels(141, 480 - 16 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-    assert(pixel[0] > 200 && pixel[1] < 140 && pixel[2] < 140);
+    glReadPixels(133, 480 - 16 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    assert(pixel[1] > 160 && pixel[1] > pixel[0] + 30);
     assert(frame(640, 480) == SPO_OK);
     assert(draw_calls == 1 && upload_calls == 0);
     assert(texture_calls == 1 && texture_width == 1);

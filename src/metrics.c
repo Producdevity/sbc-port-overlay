@@ -76,12 +76,13 @@ int spo_parse_process(const char *text, uint64_t *ticks, uint64_t *rss) {
     *ticks = user + kernel;
     return 1;
 }
-int spo_parse_mem(const char *text, double *out) {
+/* System RAM in use in MB: MemTotal less MemAvailable. */
+static int meminfo_kb(const char *text, const char *name, uint64_t *out) {
+    size_t length = strlen(name);
     const char *p = text, *end;
-    uint64_t value;
     while (p && *p) {
-        if (!strncmp(p, "MemAvailable:", 13)) {
-            if (!u64(p + 13, &value, &end))
+        if (!strncmp(p, name, length) && p[length] == ':') {
+            if (!u64(p + length + 1, out, &end))
                 return 0;
             while (*end == ' ' || *end == '\t')
                 end++;
@@ -90,16 +91,21 @@ int spo_parse_mem(const char *text, double *out) {
             end += 2;
             while (*end == ' ' || *end == '\t' || *end == '\r')
                 end++;
-            if (*end && *end != '\n')
-                return 0;
-            *out = (double)value / 1024.0;
-            return 1;
+            return !*end || *end == '\n';
         }
         p = strchr(p, '\n');
         if (p)
             p++;
     }
     return 0;
+}
+int spo_parse_mem(const char *text, double *out) {
+    uint64_t total, available;
+    if (!meminfo_kb(text, "MemTotal", &total) || !meminfo_kb(text, "MemAvailable", &available) ||
+        available > total)
+        return 0;
+    *out = (double)(total - available) / 1024.0;
+    return 1;
 }
 int spo_parse_number(const char *text, double *out) {
     char *end;
@@ -194,8 +200,8 @@ void spo_readers_init(spo_sampler *sample) {
         sample->page_size = 4096;
 #if defined(__linux__)
     source(sample, "/proc/stat", CPU, SPO_BIT(SPO_SYSTEM_CPU));
-    source(sample, "/proc/self/stat", PROCESS, SPO_BIT(SPO_PROCESS_CPU) | SPO_BIT(SPO_RSS));
-    source(sample, "/proc/meminfo", MEMORY, SPO_BIT(SPO_MEM_AVAILABLE));
+    source(sample, "/proc/self/stat", PROCESS, SPO_BIT(SPO_RSS));
+    source(sample, "/proc/meminfo", MEMORY, SPO_BIT(SPO_RAM_USED));
     if (!source(sample, "/sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq", CPU_CLOCK,
                 SPO_BIT(SPO_CPU_CLOCK)))
         source(sample, "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", CPU_CLOCK,
@@ -274,29 +280,12 @@ static int decode(spo_sampler *sample, spo_source *s, const char *text, uint64_t
         if (!spo_parse_process(text, &a, &b))
             return 0;
         metric(sample, SPO_RSS, (double)b * (double)sample->page_size / 1048576.0, now);
-        if (sample->process_baseline && a >= sample->process_previous &&
-            now > sample->process_stamp) {
-#ifdef _SC_NPROCESSORS_ONLN
-            long cores = sysconf(_SC_NPROCESSORS_ONLN);
-#else
-            long cores = 1;
-#endif
-            metric(sample, SPO_PROCESS_CPU,
-                   100.0 * (double)(a - sample->process_previous) / (double)sample->ticks * 1e9 /
-                       (double)(now - sample->process_stamp) / (double)(cores > 0 ? cores : 1),
-                   now);
-        }
-        else
-            sample->live[SPO_PROCESS_CPU].valid = 0;
-        sample->process_previous = a;
-        sample->process_stamp = now;
-        sample->process_baseline = 1;
         return 1;
     }
     if (s->kind == MEMORY) {
         if (!spo_parse_mem(text, &v))
             return 0;
-        metric(sample, SPO_MEM_AVAILABLE, v, now);
+        metric(sample, SPO_RAM_USED, v, now);
         return 1;
     }
     if (s->kind == CHARGING) {

@@ -72,14 +72,14 @@ enum {
     SPO_GRAPH,
     SPO_LOW_1,
     SPO_SYSTEM_CPU,
-    SPO_PROCESS_CPU,
+    SPO_PROCESS_CPU, /* unused; the slot keeps the other values stable */
     SPO_GPU_LOAD,
     SPO_CPU_CLOCK,
     SPO_GPU_CLOCK,
     SPO_TEMPERATURE,
     SPO_BATTERY,
     SPO_RSS,
-    SPO_MEM_AVAILABLE,
+    SPO_RAM_USED,
     SPO_SELF_COST,
     SPO_CHARGING,
     SPO_ITEM_COUNT
