@@ -12,7 +12,7 @@ fps=${8:-0}
 case "$preset" in suite|0|1|2|3|4) ;; *) exit 2;; esac
 case "$mode" in benchmark|capture) ;; *) exit 2;; esac
 case "$duration" in ''|*[!0-9]*) exit 2;; esac
-[ "$duration" -ge 3 ] && [ "$duration" -le 120 ] || exit 2
+[ "$duration" -ge 3 ] && [ "$duration" -le 45 ] || exit 2
 case "$menu" in -1|0|1|2) ;; *) exit 2;; esac
 case "$uncapped:$maxitems" in 0:0|0:1|1:0|1:1) ;; *) exit 2;; esac
 case "$work" in ''|*[!0-9]*) exit 2;; esac
@@ -21,12 +21,42 @@ case "$fps" in 0|60) ;; *) exit 2;; esac
 [ "$preset" != suite ] || [ "$duration" -le 45 ] || exit 2
 package=$(mktemp -d "${TMPDIR:-/tmp}/spo-package.XXXXXX")
 cleanup_local() {
-    case "$package" in */spo-package.*) rm -f "${package:?}/spo_demo" "$package/remove_gamelist_entry.py" "$package/params"; rmdir "$package";; esac
+    case "$package" in */spo-package.*) rm -f "${package:?}/spo_demo" "$package/knulli_run_remote.sh" "$package/params"; rmdir "$package";; esac
 }
 trap cleanup_local EXIT HUP INT TERM
-cp build-aarch64/spo_demo "$package/spo_demo"
-cp tools/remove_gamelist_entry.py "$package/remove_gamelist_entry.py"
+cp "${SPO_DEMO_BINARY:-build-aarch64/spo_demo}" "$package/spo_demo"
+cp tools/knulli_run_remote.sh "$package/knulli_run_remote.sh"
 printf '%s %s %s %s %s %s %s %s\n' "$preset" "$mode" "$duration" "$menu" "$uncapped" "$maxitems" "$work" "$fps" > "$package/params"
-remote=$(cat tools/knulli_run_remote.sh)
-COPYFILE_DISABLE=1 tar -C "$package" -cf - spo_demo remove_gamelist_entry.py params |
+remote='set -eu
+umask 077
+lock=/tmp/pm-device-lock
+mkdir "$lock" || exit 75
+owner="sbc-port-overlay-run-$$"
+root="/tmp/spo-verify-$$"
+created=0
+cleanup() {
+    status=$?
+    trap - EXIT HUP INT TERM
+    if [ "$created" = 1 ] && [ "$(cat "$root/owner" 2>/dev/null)" = "$owner" ]; then
+        case "$root" in /tmp/spo-verify-*) ;; *) exit 1;; esac
+        suffix=${root#/tmp/spo-verify-}
+        case "$suffix" in ""|*[!0-9]*) exit 1;; *) rm -rf -- "${root:?}";; esac
+    fi
+    if [ "$(cat "$lock/owner" 2>/dev/null)" = "$owner" ]; then rm -f "$lock/owner"; rmdir "$lock"; fi
+    exit "$status"
+}
+trap cleanup EXIT HUP INT TERM
+printf "%s\n" "$owner" > "$lock/owner"
+last=$(cat /tmp/pm-device-last-run 2>/dev/null || echo 0)
+case "$last" in ""|*[!0-9]*) exit 75;; esac
+[ "$(($(date +%s)-last))" -ge 120 ] || exit 75
+case "$(curl -s -m 3 http://127.0.0.1:1234/isIdle)" in *true*) ;; *) exit 75;; esac
+case "$(curl -s -m 3 http://127.0.0.1:1234/runningGame)" in *"NO GAME RUNNING"*) ;; *) exit 75;; esac
+[ "$(knulli-audio getSystemVolume)" = 0 ] || exit 75
+mkdir "$root"
+created=1
+printf "%s\n" "$owner" > "$root/owner"
+tar -xf - -C "$root"
+SPO_PREPARED=1 exec sh "$root/knulli_run_remote.sh"'
+COPYFILE_DISABLE=1 tar -C "$package" -cf - spo_demo knulli_run_remote.sh params |
     ssh -o BatchMode=yes -o ConnectTimeout=8 knulli_40-h "$remote"

@@ -133,6 +133,7 @@ static void report(double *cpu, double *wall, double *gpu, size_t count, size_t 
     spo_get_stats(&stats);
     sampling.struct_size = sizeof(sampling);
     spo_get_sampling_stats(&sampling);
+    printf("measurement_phase,steady_state\nwarmup_seconds,2\n");
     printf("metric,samples,mean_us,p95_us,p99_us,max_us\n");
     summary("cpu", cpu, count);
     summary("wall", wall, count);
