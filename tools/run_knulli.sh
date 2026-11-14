@@ -59,4 +59,4 @@ printf "%s\n" "$owner" > "$root/owner"
 tar -xf - -C "$root"
 SPO_PREPARED=1 exec sh "$root/knulli_run_remote.sh"'
 COPYFILE_DISABLE=1 tar -C "$package" -cf - spo_demo knulli_run_remote.sh params |
-    ssh -o BatchMode=yes -o ConnectTimeout=8 knulli_40-h "$remote"
+    ssh -o BatchMode=yes -o ConnectTimeout=8 "${SPO_SSH_HOST:?set SPO_SSH_HOST to the device SSH host}" "$remote"

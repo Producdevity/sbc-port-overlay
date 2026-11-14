@@ -800,8 +800,8 @@ Host unit tests cover observable behavior rather than renderer internals:
 - Fixture parsers: exact three-device formats plus whitespace, process comm
   parentheses, reset/wrapped counters, invalid units, truncation and overflow.
 
-Capture proc/sysfs fixtures read-only from `knulli_40-h` (H700/KNULLI),
-`amberelec-r36s` (RK3326/AmberELEC), and `spruce-flip` (RK3566/Spruce).
+Capture proc/sysfs fixtures read-only from an H700 KNULLI device,
+an RK3326 AmberELEC device and an RK3566 Spruce device.
 Store only relevant counters/metadata, replacing personal process names with
 synthetic equivalents. Record device/CFW/kernel, source-relative paths, units
 and capture time. Do not assume a path from another port or firmware build.
@@ -813,7 +813,7 @@ unpack buffer, gl4es, init failures and shutdown. Track allocator calls after
 init and inspect dynamic dependencies/symbols for unwanted GL/SDL linkage.
 Compile/link minimal C, C++, Zig and Rust consumers of both library variants.
 
-On `knulli_40-h`, launch the demo through the installed firmware frontend.
+On an H700 KNULLI device, launch the demo through the installed firmware frontend.
 Record artifact hash, firmware/kernel/GL driver, resolution, refresh, CPU
 governor/affinity, achieved clocks and temperature. After warmup, interleave
 Off/on/Off trials for each preset under the same steady load, including a
@@ -843,7 +843,7 @@ isolation, input/hotkey behavior and cleanup; screenshots alone are not proof.
 
 Device procedure for **every** SSH probe, fixture capture or demo run:
 
-- Never use `muos_35-h`.
+- Use only devices that nobody else is using.
 - Acquire `/tmp/pm-device-lock` atomically with mkdir and write an owner line
   identifying this task. Do not steal an existing lock. Install a trap that
   releases only this task's lock and handles partial setup failure.

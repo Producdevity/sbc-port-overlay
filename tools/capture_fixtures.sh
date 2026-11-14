@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -eu
 host=${1:?SSH alias required}
-case "$host" in knulli_40-h|amberelec-r36s|spruce-flip) ;; *) exit 2;; esac
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$host" sh -s <<'REMOTE'
 set -eu
 lock=/tmp/pm-device-lock
