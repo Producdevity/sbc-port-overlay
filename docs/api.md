@@ -78,10 +78,24 @@ vsync=1
 Saves are atomic: a temp file is written, then renamed over the old one. Your
 port creates the directory.
 
+`font_scale` picks the font: 1 is 6x12, 2 is 8x16 (the default), 3 is 12x24 and
+4 is 16x32. If the overlay does not fit the screen it uses the next smaller one.
+
+## Colours
+
+- FPS, frame time and graph bars are green at the target rate, yellow up to 10%
+  below it and red beyond. Rates within 2% of the target count as on target.
+- The target is the nearest of 30, 60 and 120 at or above the median rate.
+  `spo_target_fps_set(fps)` sets it instead; 0 goes back to automatic.
+- CPU and GPU load turn yellow from 85% and red from 95%. Temperature turns
+  yellow from 70 C and red from 80 C. Battery turns yellow at 20% and red at
+  10%.
+
 ## GL state
 
-Everything is created in `spo_init`: one buffer, one shader and a 128×64
-atlas. Each frame saves the state below, draws once and restores it:
+Everything is created in `spo_init`: one buffer, one shader and a 256×256
+atlas. The atlas holds one font size and is uploaded again when the size
+changes. Each frame saves the state below, draws once and restores it:
 - program, texture unit 0 and its sampler;
 - buffers, VAO and vertex attributes; on ES3, uniform buffer binding 0;
 - blend state, enables, viewport and color mask;

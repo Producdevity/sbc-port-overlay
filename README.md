@@ -5,8 +5,9 @@ Settings menu and performance overlay for Linux ports on ARM handhelds
 
 - Tap Menu to open it. Menu+button firmware hotkeys keep working.
 - Presets range from an FPS counter to a frame-time graph, CPU/GPU load and
-  clocks, temperature, battery and memory. Each item, the position, the size
-  and the opacity can be changed.
+  clocks, temperature, battery and memory. Colour marks values that need
+  attention. Each item, the position, the size and the opacity can be changed.
+  Sizes are the native 6x12, 8x16, 12x24 and 16x32 Spleen fonts.
 - Ports can add their own settings pages and counters. Settings are saved per
   port.
 - Each frame is a single draw call, with no allocations. Stats are read once a
