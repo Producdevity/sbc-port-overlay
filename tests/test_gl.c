@@ -1,5 +1,4 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-#include "../src/font_data.h"
 #include "../src/internal.h"
 #include "spo.h"
 #include <EGL/egl.h>
@@ -9,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 static int no_vao, es3, fail_mode;
-static int rendering, draw_calls, upload_calls, texture_calls, texture_width;
+static int rendering, draw_calls, upload_calls, texture_calls, texture_width, font_upload;
 static size_t upload_bytes;
 static void draw_arrays(GLenum mode, GLint first, GLsizei count) {
     if (rendering)
@@ -28,7 +27,7 @@ static void texture_subimage(GLenum target, GLint level, GLint x, GLint y, GLsiz
     if (rendering) {
         texture_calls++;
         texture_width = w;
-        assert(y == 63 && h == 1);
+        assert((y == SPO_ATLAS_GRAPH_ROW && h == 1) || (font_upload && x == 0 && w == SPO_ATLAS));
     }
     glTexSubImage2D(target, level, x, y, w, h, format, type, data);
 }
@@ -204,6 +203,27 @@ static void take(audit *a) {
     }
     assert(a->count < 256);
     assert(glGetError() == GL_NO_ERROR);
+}
+/* Every pixel of one native glyph cell must match the atlas source at 1:1. */
+static void check_glyph(int size, char code, int x0, int y0) {
+    const spo_font_info *f = spo_font_get((uint32_t)size);
+    uint8_t band[SPO_ATLAS * 32 * 4], pixel[4];
+    unsigned index = (unsigned)code - 32;
+    int x, y;
+    spo_font_band((uint32_t)size, (index / (unsigned)f->cols) * (unsigned)f->ch, (unsigned)f->ch,
+                  band);
+    for (y = 0; y < f->ch; y++)
+        for (x = 0; x < f->cw; x++) {
+            int on = band[((size_t)y * SPO_ATLAS + (index % (unsigned)f->cols) * (unsigned)f->cw +
+                           (unsigned)x) *
+                              4 +
+                          3];
+            glReadPixels(x0 + x, 480 - (y0 + y) - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+            if (on)
+                assert(pixel[0] > 135 && pixel[1] > 140 && pixel[2] > 150);
+            else
+                assert(pixel[0] < 110 && pixel[1] < 110 && pixel[2] < 110);
+        }
 }
 static GLuint shader(GLenum type, const char *text) {
     GLint ok;
@@ -412,25 +432,10 @@ int main(int argc, char **argv) {
         assert(stats.draw_calls == 1);
     }
     {
-        int x, y;
-        for (y = 0; y < 8; y++)
-            for (x = 0; x < 5; x++) {
-                glReadPixels(15 + x * 2, 480 - (15 + y * 2) - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE,
-                             pixel);
-                if (spo_font['-' - 32][y] & (0x80u >> x))
-                    assert(pixel[0] > 180 && pixel[1] > 180 && pixel[2] > 180);
-                else
-                    assert(pixel[0] < 130 && pixel[1] < 130 && pixel[2] < 130);
-            }
-        for (y = 0; y < 8; y++)
-            for (x = 0; x < 5; x++) {
-                glReadPixels(205 + x * 2, 480 - (303 + y * 2) - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE,
-                             pixel);
-                if (spo_font['F' - 32][y] & (0x80u >> x))
-                    assert(pixel[0] > 180 && pixel[1] > 180 && pixel[2] > 180);
-                else
-                    assert(pixel[0] < 130 && pixel[1] < 130 && pixel[2] < 130);
-            }
+        /* Counter rows follow the FPS row: labels start 16 px apart at the default size. */
+        check_glyph(2, 'F', 12, 12);
+        check_glyph(2, 'C', 12, 28);
+        check_glyph(2, 'S', 12, 12 + 16 * 9);
     }
     assert(frame(640, 480) == SPO_OK);
     assert(draw_calls == 1 && upload_calls == 0);
@@ -451,16 +456,16 @@ int main(int argc, char **argv) {
     assert(frame(640, 480) == SPO_OK);
     take(&after);
     assert(!memcmp(&before, &after, sizeof(audit)));
-    glReadPixels(135, 480 - 44 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    glReadPixels(137, 480 - 33 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
     assert(pixel[1] > 160 && pixel[1] > pixel[0] + 30);
-    glReadPixels(135, 480 - 20 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    glReadPixels(137, 480 - 18 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
     assert(pixel[0] < 130 && pixel[1] < 130);
     spo->intervals[60] = 100000000;
     spo->graph_serial = UINT64_MAX;
     spo->last_stamp = 0;
     assert(frame(640, 480) == SPO_OK);
-    glReadPixels(135, 480 - 15 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-    assert(pixel[0] > 180 && pixel[1] > 180 && pixel[2] > 180);
+    glReadPixels(133, 480 - 16 - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    assert(pixel[0] > 200 && pixel[1] < 140 && pixel[2] < 140);
     assert(frame(640, 480) == SPO_OK);
     assert(draw_calls == 1 && upload_calls == 0);
     assert(texture_calls == 1 && texture_width == 1);
@@ -480,10 +485,25 @@ int main(int argc, char **argv) {
     assert(!memcmp(&before, &after, sizeof(audit)));
     o.struct_size = sizeof(o);
     assert(spo_overlay_get(&o) == SPO_OK);
-    o.font_scale = 4;
     o.items = 1u << SPO_FPS;
+    spo->counter_mask = spo->indicator_mask = 0;
+    for (i = 0; i < 4; i++) {
+        static const uint32_t sizes[] = {3, 4, 1, 2};
+        const spo_font_info *f = spo_font_get(sizes[i]);
+        o.font_scale = sizes[i];
+        assert(spo_overlay_set(&o) == SPO_OK);
+        font_upload = 1;
+        assert(frame(640, 480) == SPO_OK);
+        font_upload = 0;
+        assert(texture_calls > 0);
+        check_glyph((int)sizes[i], 'F', 8 + f->cw / 2, 8 + f->ch / 4);
+        assert(frame(640, 480) == SPO_OK && texture_calls == 0);
+    }
+    o.font_scale = 4;
     assert(spo_overlay_set(&o) == SPO_OK);
+    font_upload = 1;
     assert(frame(640, 480) == SPO_OK);
+    font_upload = 0;
     spo_shutdown();
     take(&after);
     assert(!memcmp(&before, &after, sizeof(audit)));

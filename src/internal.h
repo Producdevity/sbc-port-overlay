@@ -21,11 +21,29 @@ typedef struct {
     uint32_t count, revision;
     uint8_t graph_data[120][4];
     uint32_t graph_head, graph_count, graph_scale, graph_epoch, graph_version;
+    uint32_t font;
 } spo_mesh;
+#define SPO_ATLAS 256
+#define SPO_ATLAS_GRAPH_ROW (SPO_ATLAS - 1)
+#define SPO_ATLAS_SOLID_X 255
+#define SPO_ATLAS_SOLID_Y 254
 typedef struct {
-    const uint8_t *rgba;
-    uint32_t width, height;
-} spo_atlas;
+    int cw, ch, cols, grid_h;
+} spo_font_info;
+enum {
+    SPO_TONE_VALUE,
+    SPO_TONE_LABEL,
+    SPO_TONE_DIM,
+    SPO_TONE_GOOD,
+    SPO_TONE_WARN,
+    SPO_TONE_BAD,
+    SPO_TONE_ACCENT,
+    SPO_TONE_COUNT
+};
+typedef struct {
+    char label[17], cell[3][24];
+    uint8_t tone[3], reserve[3];
+} spo_row;
 typedef struct {
     char key[33], label[25];
     uint32_t count, first;
@@ -80,7 +98,8 @@ typedef struct {
     int open, drain, root, detail, cursor, editing;
     uint64_t intervals[SPO_HISTORY], last_stamp, window_ns, refresh_stamp, history_serial;
     uint32_t history_count, history_next, window_frames;
-    double fps, frame_ms, low_1, graph_max;
+    double fps, frame_ms, low_1, graph_max, target_fps;
+    uint32_t host_target;
     uint64_t graph_high_at;
     spo_sampler *sampler;
     uint32_t sampling_sequence, requested_items, available_items;
@@ -99,13 +118,14 @@ typedef struct {
     spo_rect panel;
     uint32_t actual_scale;
     int battery_charging;
-    char lines[40][64];
-    uint32_t line_count, header_lines, formatted_valid;
+    spo_row rows[40];
+    uint32_t row_count, header_rows, formatted_valid;
+    spo_rect graph_rect;
     uint64_t graph_range_at;
     uint64_t graph_serial;
-    double graph_pixel_range, graph_pixel_factor;
+    double graph_pixel_range, graph_pixel_factor, graph_pixel_target;
     int graph_pixel_scale;
-    double graph_label_range;
+    double graph_label_range, graph_label_target;
     char graph_label[32];
     uint64_t formatted_at, format_checked_at;
     spo_overlay_settings formatted_settings;
@@ -114,7 +134,6 @@ typedef struct {
     uint64_t stats_window;
     double cpu_sum, wall_sum, cpu_max;
     uint32_t stats_frames, frame_reads;
-    uint8_t atlas_pixels[128 * 64 * 4];
     void *renderer;
 } spo_context;
 extern spo_context *spo;
@@ -148,8 +167,9 @@ int spo_parse_number(const char *, double *);
 int spo_parse_gpu_load(const char *, double *);
 spo_result spo_layout(uint32_t, uint32_t);
 spo_rect spo_anchor(uint32_t, uint32_t, int, int, int);
-void spo_font_atlas(uint8_t *);
-spo_result spo_backend_init(const spo_atlas *);
+const spo_font_info *spo_font_get(uint32_t);
+void spo_font_band(uint32_t, uint32_t, uint32_t, uint8_t *);
+spo_result spo_backend_init(void);
 void spo_backend_shutdown(void);
 spo_result spo_backend_draw(const spo_mesh *, uint32_t, uint32_t, uint32_t *);
 const char *spo_item_name(uint32_t);

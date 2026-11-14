@@ -86,7 +86,7 @@ typedef struct {
     void (*UniformBlockBinding)(GLuint, GLuint, GLuint);
     GLuint program, texture, buffer, vao;
     GLint viewport_uniform, texture_uniform, graph_uniform;
-    uint32_t graph_head, graph_count, graph_scale, graph_epoch, graph_version;
+    uint32_t graph_head, graph_count, graph_scale, graph_epoch, graph_version, font;
     int es3, sample_mask, unpack_subimage;
     uint32_t width, height, stride, slot, attribute_slot;
     uint32_t cached_revision, slot_count[3];
@@ -288,7 +288,22 @@ static void texture_parameters(spo_gl *g) {
     g->TexParameteri(TEXTURE_2D, 0x2803, 0x812f);
 }
 static int warmup(spo_gl *, gl_state *);
-spo_result spo_backend_init(const spo_atlas *atlas) {
+static void upload_font(spo_gl *g, uint32_t size) {
+    uint8_t band[SPO_ATLAS * 16 * 4];
+    const spo_font_info *f = spo_font_get(size);
+    GLint unpack[5] = {0};
+    uint32_t y;
+    unpack_capture(g, unpack);
+    for (y = 0; y < (uint32_t)f->grid_h; y += 16) {
+        uint32_t rows = (uint32_t)f->grid_h - y < 16 ? (uint32_t)f->grid_h - y : 16;
+        spo_font_band(size, y, rows, band);
+        g->TexSubImage2D(TEXTURE_2D, 0, 0, (GLint)y, SPO_ATLAS, (GLsizei)rows, 0x1908, 0x1401,
+                         band);
+    }
+    unpack_restore(g, unpack);
+    g->font = size < 1 ? 1 : size > 4 ? 4 : size;
+}
+spo_result spo_backend_init(void) {
     spo_gl *g = calloc(1, sizeof(*g));
     gl_state state;
     int major = 2, minor = 0, unpack_saved = 0;
@@ -303,9 +318,9 @@ spo_result spo_backend_init(const spo_atlas *atlas) {
         "void main(){vec3 rgb=c.rgb;float a;if(t.x<0.){float column=floor(-t.x-1.);"
         "if(column<120.-graph.y)discard;"
         "float slot=mod(column+graph.x,120.);"
-        "vec4 d=SAMPLE(atlas,vec2((slot+.5)/128.,63.5/64.));"
-        "float h=floor(d.r*255.+.5);if(h<=(20.-t.y)*graph.z)discard;"
-        "if(d.g>.5&&t.y<1.)rgb=vec3(240.,242.,244.)/255.;a=c.a;"
+        "vec4 d=SAMPLE(atlas,vec2((slot+.5)/256.,255.5/256.));"
+        "float h=floor(d.r*255.+.5);if(h<=(1.-t.y)*graph.z)discard;"
+        "rgb=d.gba;a=c.a;"
         "}else{a=SAMPLE(atlas,t).a*c.a;}OUTPUT=vec4(rgb*a,a);}";
     char fragment_source[2048];
     if (!g)
@@ -375,9 +390,9 @@ spo_result spo_backend_init(const spo_atlas *atlas) {
                               "vec2 corner=vec2(k==2||k==4||k==5?1.:0.,k==1||k==2||k==4?1.:0.);"
                               "vec2 a=vec2(q.x&65535u,q.x>>16),b=vec2(q.y&65535u,q.y>>16);"
                               "vec2 p=mix(a,b,corner);"
-                              "if(q.z==0xffffffffu)t=mix(vec2(-1.,0.),vec2(-121.,20.),corner);"
+                              "if(q.z==0xffffffffu)t=mix(vec2(-1.,0.),vec2(-121.,1.),corner);"
                               "else t=mix(vec2(q.z&255u,(q.z>>8)&255u),"
-                              "vec2((q.z>>16)&255u,q.z>>24),corner)/vec2(256.,128.);"
+                              "vec2((q.z>>16)&255u,q.z>>24),corner)/vec2(256.);"
                               "c=vec4(q.w&255u,(q.w>>8)&255u,(q.w>>16)&255u,q.w>>24)/255.;"
                               "gl_Position=vec4(p.x*2./size.x-1.,1.-p.y*2./size.y,0.,1.);}";
         snprintf(
@@ -444,8 +459,14 @@ spo_result spo_backend_init(const spo_atlas *atlas) {
         goto resource_failure;
     g->BindTexture(TEXTURE_2D, g->texture);
     texture_parameters(g);
-    g->TexImage2D(TEXTURE_2D, 0, 0x1908, (GLsizei)atlas->width, (GLsizei)atlas->height, 0, 0x1908,
-                  0x1401, atlas->rgba);
+    g->TexImage2D(TEXTURE_2D, 0, 0x1908, SPO_ATLAS, SPO_ATLAS, 0, 0x1908, 0x1401, NULL);
+    {
+        static const uint8_t solid[16] = {255, 255, 255, 255, 255, 255, 255, 255,
+                                          255, 255, 255, 255, 255, 255, 255, 255};
+        g->TexSubImage2D(TEXTURE_2D, 0, SPO_ATLAS_SOLID_X - 1, SPO_ATLAS_SOLID_Y - 1, 2, 2, 0x1908,
+                         0x1401, solid);
+    }
+    upload_font(g, spo->overlay.font_scale);
     unpack_restore(g, unpack);
     unpack_saved = 0;
     g->UseProgram(g->program);
@@ -535,8 +556,8 @@ static void pack_mesh(spo_gl *g, const spo_mesh *mesh) {
         out[0] = pair(a->x, a->y);
         out[1] = pair(b->x, b->y);
         out[2] = a->u < 0 ? UINT32_MAX
-                          : (uint32_t)(a->u * 256) | ((uint32_t)(a->v * 128) << 8) |
-                                ((uint32_t)(b->u * 256) << 16) | ((uint32_t)(b->v * 128) << 24);
+                          : (uint32_t)(a->u * 256) | ((uint32_t)(a->v * 256) << 8) |
+                                ((uint32_t)(b->u * 256) << 16) | ((uint32_t)(b->v * 256) << 24);
         out[3] = (uint32_t)a->color[0] | ((uint32_t)a->color[1] << 8) |
                  ((uint32_t)a->color[2] << 16) | ((uint32_t)a->color[3] << 24);
     }
@@ -601,8 +622,8 @@ static void upload_graph(spo_gl *g, const spo_mesh *mesh) {
         size_t bytes = single ? 4 : sizeof(mesh->graph_data);
         if (memcmp(g->cached_mesh.graph_data[first], mesh->graph_data[first], bytes)) {
             unpack_capture(g, unpack);
-            g->TexSubImage2D(TEXTURE_2D, 0, (GLint)first, 63, single ? 1 : 120, 1, 0x1908, 0x1401,
-                             mesh->graph_data[first]);
+            g->TexSubImage2D(TEXTURE_2D, 0, (GLint)first, SPO_ATLAS_GRAPH_ROW, single ? 1 : 120, 1,
+                             0x1908, 0x1401, mesh->graph_data[first]);
             unpack_restore(g, unpack);
             memcpy(g->cached_mesh.graph_data[first], mesh->graph_data[first], bytes);
         }
@@ -641,8 +662,8 @@ static int warmup(spo_gl *g, gl_state *state) {
     prepare(g, state, 1, 1);
     g->Uniform3f(g->graph_uniform, 0, 120, 1);
     if (g->es3) {
-        const uint32_t quads[8] = {0, 0x00010001, 0x7fff7fff, UINT32_MAX,
-                                   0, 0x00010001, UINT32_MAX, UINT32_MAX};
+        const uint32_t quads[8] = {0, 0x00010001, 0xfefffeffu, UINT32_MAX,
+                                   0, 0x00010001, UINT32_MAX,  UINT32_MAX};
         g->BindBuffer(0x8a11, g->buffer);
         g->BufferSubData(0x8a11, 0, sizeof(quads), quads);
         g->BindBufferRange(0x8a11, 0, g->buffer, 0, 16384);
@@ -653,8 +674,8 @@ static int warmup(spo_gl *g, gl_state *state) {
             float x = corners[i % 6][0], y = corners[i % 6][1];
             vertices[i] = (spo_vertex){x,
                                        y,
-                                       i < 6 ? 127.5f / 128.0f : -1 - x * 120,
-                                       i < 6 ? 63.5f / 64.0f : y * 20,
+                                       i < 6 ? 255.0f / 256.0f : -1 - x * 120,
+                                       i < 6 ? 254.0f / 256.0f : y,
                                        {255, 255, 255, 255}};
         }
         g->BindBuffer(ARRAY_BUFFER, g->buffer);
@@ -695,6 +716,8 @@ spo_result spo_backend_draw(const spo_mesh *mesh, uint32_t width, uint32_t heigh
         return SPO_CAPACITY;
     capture(g, &state);
     prepare(g, &state, width, height);
+    if (mesh->font != g->font && mesh->font >= 1 && mesh->font <= 4)
+        upload_font(g, mesh->font);
     upload_mesh(g, mesh);
     upload_graph(g, mesh);
     g->DrawArrays(0x0004, 0, (GLsizei)mesh->count);

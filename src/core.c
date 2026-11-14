@@ -115,9 +115,7 @@ spo_result spo_init(const spo_config *c) {
         return result;
     }
     if (!(c->flags & SPO_INIT_NO_RENDER)) {
-        spo_atlas atlas = {spo->atlas_pixels, 128, 64};
-        spo_font_atlas(spo->atlas_pixels);
-        result = spo_backend_init(&atlas);
+        result = spo_backend_init();
         if (result != SPO_OK) {
             spo_shutdown();
             return result;
@@ -379,6 +377,15 @@ spo_result spo_overlay_set(const spo_overlay_settings *in) {
     }
     spo->dirty = 1;
     spo_metrics_request();
+    return SPO_OK;
+}
+spo_result spo_target_fps_set(uint32_t fps) {
+    if (!usable())
+        return SPO_NOT_INITIALIZED;
+    if (fps && (fps < 10 || fps > 1000))
+        return spo_fail(SPO_INVALID);
+    spo->host_target = fps;
+    spo->formatted_at = 0;
     return SPO_OK;
 }
 spo_result spo_preset_set(uint32_t preset) {

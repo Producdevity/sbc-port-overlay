@@ -263,7 +263,7 @@ static void maximal_layout(void) {
     for (i = SPO_SYSTEM_CPU; i <= SPO_MEM_AVAILABLE; i++)
         spo->metrics[i] = (spo_metric){100, spo_now(), 1};
     assert(spo_layout(640, 480) == SPO_OK);
-    assert(spo->line_count >= 20 && spo->panel.y >= 8 && spo->panel.y + spo->panel.h <= 472);
+    assert(spo->row_count >= 20 && spo->panel.y >= 8 && spo->panel.y + spo->panel.h <= 472);
     spo->overlay.font_scale = 4;
     assert(spo_layout(640, 480) == SPO_OK && spo->actual_scale <= 2);
     assert(spo_layout(1280, 720) == SPO_OK);
@@ -488,16 +488,210 @@ static void graph_ring(void) {
     spo->history_serial++;
     spo->graph_range_at = spo_now();
     assert(spo_layout(640, 480) == SPO_OK);
-    assert(spo->mesh.graph_data[newest][0] == 40 && spo->mesh.graph_data[newest][1] == 255);
+    assert(spo->mesh.graph_data[newest][0] == 28 && spo->mesh.graph_data[newest][1] == 255 &&
+           spo->mesh.graph_data[newest][2] == 90);
     settings.font_scale = 3;
     assert(spo_overlay_set(&settings) == SPO_OK);
     assert(spo_layout(640, 480) == SPO_OK);
-    assert(spo->mesh.graph_epoch != epoch && spo->mesh.graph_scale == 3);
+    assert(spo->mesh.graph_epoch != epoch && spo->mesh.graph_scale == 42);
     assert(spo->mesh.graph_data[0][0] > previous[0][0]);
     spo_reset_timing();
     assert(spo_layout(640, 480) == SPO_OK && !spo->mesh.graph_count);
     for (int i = 0; i < 120; i++)
         assert(!spo->mesh.graph_data[i][0]);
+}
+static const spo_row *find_row(const char *label) {
+    for (uint32_t i = 0; i < spo->row_count; i++)
+        if (!strcmp(spo->rows[i].label, label))
+            return &spo->rows[i];
+    return NULL;
+}
+static void steady_history(double interval_ms) {
+    spo->history_count = spo->history_next = 120;
+    spo->history_serial = 120;
+    for (int i = 0; i < 120; i++)
+        spo->intervals[i] = (uint64_t)(interval_ms * 1e6);
+}
+static void relayout(void) {
+    spo->formatted_at = 0;
+    assert(spo_layout(640, 480) == SPO_OK);
+}
+static void colours(void) {
+    spo_overlay_settings settings;
+    reset();
+    assert(spo_preset_set(4) == SPO_OK);
+    for (int i = SPO_SYSTEM_CPU; i <= SPO_MEM_AVAILABLE; i++)
+        spo->metrics[i] = (spo_metric){10, spo_now(), 1};
+    steady_history(16.7);
+    spo->frame_ms = 16.7;
+    /* Rates within 2% of the target are green; 10% below is the yellow edge. */
+    for (int i = 0; i < 5; i++) {
+        static const double rates[] = {60.0, 59.94, 55.0, 50.0, 0.0};
+        static const int tones[] = {SPO_TONE_GOOD, SPO_TONE_GOOD, SPO_TONE_WARN, SPO_TONE_BAD,
+                                    SPO_TONE_VALUE};
+        spo->fps = rates[i];
+        relayout();
+        assert(spo->target_fps == 60);
+        assert(find_row("FPS")->tone[0] == tones[i] && find_row("FPS")->tone[1] == tones[i]);
+    }
+    steady_history(33.3);
+    spo->fps = 29.9;
+    relayout();
+    assert(spo->target_fps == 30 && find_row("FPS")->tone[0] == SPO_TONE_GOOD);
+    steady_history(8.3);
+    spo->fps = 120;
+    relayout();
+    assert(spo->target_fps == 120);
+    steady_history(16.4);
+    relayout();
+    assert(spo->target_fps == 60);
+    assert(spo_target_fps_set(5) == SPO_INVALID && spo_target_fps_set(2000) == SPO_INVALID);
+    steady_history(33.3);
+    spo->fps = 30;
+    assert(spo_target_fps_set(60) == SPO_OK);
+    relayout();
+    assert(spo->target_fps == 60 && find_row("FPS")->tone[0] == SPO_TONE_BAD);
+    assert(spo_target_fps_set(0) == SPO_OK);
+    relayout();
+    assert(spo->target_fps == 30 && find_row("FPS")->tone[0] == SPO_TONE_GOOD);
+    {
+        static const double load[] = {84, 85, 94, 95}, heat[] = {69, 70, 79, 80},
+                            charge[] = {21, 20, 11, 10};
+        static const int ladder[] = {SPO_TONE_VALUE, SPO_TONE_WARN, SPO_TONE_WARN, SPO_TONE_BAD};
+        for (int i = 0; i < 4; i++) {
+            spo->metrics[SPO_SYSTEM_CPU].value = spo->metrics[SPO_GPU_LOAD].value = load[i];
+            spo->metrics[SPO_TEMPERATURE].value = heat[i];
+            spo->metrics[SPO_BATTERY].value = charge[i];
+            relayout();
+            assert(find_row("CPU")->tone[0] == ladder[i] && find_row("GPU")->tone[0] == ladder[i]);
+            assert(find_row("TEMP")->tone[0] == ladder[i]);
+            assert(find_row("BAT")->tone[0] == ladder[i]);
+        }
+    }
+    spo->battery_charging = 1;
+    relayout();
+    assert(!strcmp(find_row("BAT")->cell[1], "CHG"));
+    assert(find_row("SELF")->tone[0] == SPO_TONE_DIM && find_row("DRAW")->tone[0] == SPO_TONE_DIM);
+    /* The graph bar colours follow the same thresholds. */
+    settings = spo->overlay;
+    settings.items = SPO_BIT(SPO_GRAPH);
+    assert(spo_overlay_set(&settings) == SPO_OK);
+    steady_history(16.7);
+    spo->intervals[3] = 18400000;
+    spo->intervals[4] = 31000000;
+    spo->graph_serial = UINT64_MAX;
+    spo->graph_range_at = spo_now();
+    relayout();
+    assert(spo->mesh.graph_data[2][1] == 98 && spo->mesh.graph_data[2][2] == 214);
+    assert(spo->mesh.graph_data[3][1] == 248 && spo->mesh.graph_data[3][2] == 200);
+    assert(spo->mesh.graph_data[4][1] == 255 && spo->mesh.graph_data[4][2] == 90);
+}
+static void sample_metrics(void) {
+    static const double values[SPO_ITEM_COUNT] = {
+        [SPO_SYSTEM_CPU] = 3,  [SPO_PROCESS_CPU] = 6,    [SPO_CPU_CLOCK] = 1512,
+        [SPO_GPU_CLOCK] = 360, [SPO_TEMPERATURE] = 42,   [SPO_BATTERY] = 94,
+        [SPO_RSS] = 44,        [SPO_MEM_AVAILABLE] = 796};
+    for (int i = SPO_SYSTEM_CPU; i <= SPO_MEM_AVAILABLE; i++)
+        if (i != SPO_GPU_LOAD)
+            spo->metrics[i] = (spo_metric){values[i], spo_now(), 1};
+    spo->battery_charging = 1;
+    spo->fps = 60;
+    spo->frame_ms = 16.7;
+    steady_history(16.7);
+    spo->stats.sample_frames = spo->sampling_stats.sample_frames = 1;
+    spo->stats.draw_calls = 1;
+    spo->sampling_stats.total_cpu_us_per_frame = 91;
+    spo->sampling_stats.cpu_us_per_frame = 13;
+}
+static void layouts(void) {
+    /* Panel areas of the previous layout at the default size, for the same readings. */
+    static const int before[] = {0, 2760, 4860, 23184, 50400};
+    spo_id id;
+    spo_counter_desc counter = {sizeof(counter), "objects", "DRAWS", "", 0};
+    spo_indicator_desc indicator = {sizeof(indicator), "shaders", "SHADERS"};
+    reset();
+    assert(spo_register_counter(&counter, &id) == SPO_OK && spo_counter_set(id, 1) == SPO_OK);
+    assert(spo_register_indicator(&indicator, &id) == SPO_OK);
+    assert(spo_indicator_set(id, 0) == SPO_OK);
+    for (int preset = 1; preset <= 4; preset++) {
+        assert(spo_preset_set((uint32_t)preset) == SPO_OK);
+        sample_metrics();
+        relayout();
+        assert(spo->actual_scale == 2 && spo->mesh.font == 2);
+        assert(spo->panel.w * spo->panel.h <= before[preset]);
+        assert(spo->mesh.count % 6 == 0 && spo->mesh.count <= SPO_QUADS * 6);
+        for (uint32_t i = 0; i < spo->mesh.count; i++) {
+            const spo_vertex *v = &spo->mesh.vertices[i];
+            assert(v->x >= 0 && v->x <= 640 && v->y >= 0 && v->y <= 480);
+            if (v->u >= 0)
+                assert(v->u >= 0 && v->u <= 1 && v->v >= 0 && v->v <= 1);
+        }
+        assert(preset == 3 ? !!spo->mesh.graph_scale : !spo->mesh.graph_scale || preset == 4);
+        if (preset == 1)
+            assert(spo->row_count == 1 && !strcmp(spo->rows[0].label, "FPS") &&
+                   !spo->rows[0].cell[1][0]);
+        if (preset == 2)
+            assert(spo->row_count == 1 && !strcmp(spo->rows[0].cell[0], "60.0") &&
+                   !strcmp(spo->rows[0].cell[1], "16.7 ms"));
+        if (preset == 3)
+            assert(find_row("FPS") && find_row("CPU") && !find_row("MEM") &&
+                   !strcmp(find_row("CPU")->cell[0], "3%") && !find_row("CPU")->cell[1][0]);
+        if (preset == 4) {
+            assert(!strcmp(find_row("CPU")->cell[0], "3%") &&
+                   !strcmp(find_row("CPU")->cell[1], "1512 MHz"));
+            assert(!strcmp(find_row("GPU")->cell[1], "360 MHz") && !find_row("GPU")->cell[0][0]);
+            assert(!strcmp(find_row("MEM")->cell[0], "44 MB") &&
+                   !strcmp(find_row("MEM")->cell[1], "796 MB"));
+            assert(!strcmp(find_row("TEMP")->cell[0], "42 C") &&
+                   !strcmp(find_row("BAT")->cell[0], "94%"));
+            assert(!strcmp(find_row("DRAWS")->cell[0], "1") &&
+                   !strcmp(find_row("SHADERS")->cell[0], "OFF"));
+            assert(!strcmp(find_row("SELF")->cell[0], "91 us") &&
+                   !strcmp(find_row("DRAW")->cell[0], "1"));
+        }
+    }
+    /* Fixed-width fields keep the panel still while the digits change. */
+    assert(spo_preset_set(2) == SPO_OK);
+    sample_metrics();
+    spo->fps = 9.9;
+    spo->frame_ms = 101.0;
+    relayout();
+    {
+        int width = spo->panel.w;
+        spo->fps = 120.0;
+        spo->frame_ms = 8.3;
+        relayout();
+        assert(spo->panel.w == width);
+        spo->fps = 60.0;
+        spo->frame_ms = 16.7;
+        relayout();
+        assert(spo->panel.w == width);
+    }
+    /* Each size draws with its own font and falls back when it does not fit. */
+    assert(spo_preset_set(4) == SPO_OK);
+    sample_metrics();
+    for (uint32_t size = 1; size <= 3; size++) {
+        spo->overlay.font_scale = size;
+        relayout();
+        assert(spo->mesh.font == spo->actual_scale && spo->actual_scale <= size);
+        assert(spo->panel.x >= 8 && spo->panel.x + spo->panel.w <= 632);
+    }
+    assert(spo->actual_scale == 3 || spo->panel.h > 464);
+}
+static void menu_layout(void) {
+    reset();
+    spo_set_open(1);
+    for (int detail = 0; detail <= 5; detail++)
+        for (int root = 0; root <= 1; root++) {
+            spo->detail = detail;
+            spo->root = detail ? 0 : root;
+            spo->cursor = 0;
+            assert(spo_layout(640, 480) == SPO_OK && spo->mesh.font == 2);
+            assert(spo->panel.x >= 8 && spo->panel.x + spo->panel.w <= 632);
+            assert(spo->panel.y >= 8 && spo->panel.y + spo->panel.h <= 472);
+            assert(spo_layout(1280, 720) == SPO_OK && spo->mesh.font == 3);
+        }
+    spo_set_open(0);
 }
 int main(void) {
     input();
@@ -512,6 +706,9 @@ int main(void) {
     graph_cache();
     graph_ring();
     maximal_layout();
+    colours();
+    layouts();
+    menu_layout();
     malformed_config();
     spo_shutdown();
     puts("core: input, anchors, presets, parsers, persistence, callbacks and timing passed");

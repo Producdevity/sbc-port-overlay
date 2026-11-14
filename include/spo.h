@@ -176,6 +176,7 @@ SPO_API const char *spo_version(void);
 SPO_API spo_result spo_overlay_get(spo_overlay_settings *);
 SPO_API spo_result spo_overlay_set(const spo_overlay_settings *);
 SPO_API spo_result spo_preset_set(uint32_t);
+SPO_API spo_result spo_target_fps_set(uint32_t);
 union SDL_Event;
 SPO_API int32_t spo_handle_sdl_event(const union SDL_Event *);
 #ifdef __cplusplus
