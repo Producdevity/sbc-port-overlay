@@ -6,7 +6,7 @@ Settings menu and performance overlay for Linux ports on ARM handhelds
 <p align="center"><img src="docs/images/overlay-galaxy.gif" alt="The overlay and its settings menu over gameplay on an RG40XX-H" width="640"></p>
 
 <p align="center">
-<img src="docs/images/overlay-menu.png" alt="The Overlay page of the settings menu" width="320">
+<img src="docs/images/overlay-menu.png" alt="The Show tab of the settings menu" width="320">
 <img src="docs/images/overlay-full.png" alt="The Full preset" width="320">
 </p>
 

@@ -88,9 +88,9 @@ static uint64_t simulated_interval(int bad, int frame) {
     static const double jitter[] = {0.0, 0.2, -0.2, 0.3, -0.3, 0.1, -0.1, 0.25, -0.25, 0.15, -0.15};
     int at = frame % 120;
     if (at == 23)
-        return (uint64_t)38e6;
+        return (uint64_t)25e6;
     if (at == 71)
-        return (uint64_t)27e6;
+        return (uint64_t)21e6;
     return (uint64_t)((16.67 + jitter[(frame * 7) % 11]) * 1e6);
 }
 static GLuint backdrop_texture(const char *path) {
