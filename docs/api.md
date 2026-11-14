@@ -185,7 +185,8 @@ active queries or transform feedback; initialization can block.
 Closed-overlay text refreshes at most twice per second. Identical text retains
 its geometry and uploaded storage. A geometry change uploads a coalesced changed
 span into the next region. Ordinary graph updates replace only the newest
-1×1 RGBA texel in an unused atlas row, with a scrolling offset uniform. History
+1×1 RGBA texel in an unused atlas row when its raster value changes, with a
+scrolling offset uniform. Identical raster values need no upload. History
 reset, scale or graph-range changes refresh the 120×1 row. No old columns are
 expanded or shifted on the CPU. Raw present intervals remain in the core's
 512-entry history; only graph raster heights are quantized to physical pixels.

@@ -464,6 +464,14 @@ int main(int argc, char **argv) {
     assert(frame(640, 480) == SPO_OK);
     assert(draw_calls == 1 && upload_calls == 0);
     assert(texture_calls == 1 && texture_width == 1);
+    spo->mesh.graph_version++;
+    spo->mesh.graph_head = (spo->mesh.graph_head + 1) % 120;
+    rendering = 1;
+    texture_calls = upload_calls = draw_calls = 0;
+    uint32_t draws = 0;
+    assert(spo_backend_draw(&spo->mesh, 640, 480, &draws) == SPO_OK);
+    rendering = 0;
+    assert(draws == 1 && draw_calls == 1 && !texture_calls && !upload_calls);
     assert(glGetError() == GL_NO_ERROR);
     assert(spo_preset_set(0) == SPO_OK);
     take(&before);

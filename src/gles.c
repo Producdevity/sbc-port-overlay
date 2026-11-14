@@ -598,10 +598,14 @@ static void upload_graph(spo_gl *g, const spo_mesh *mesh) {
                      mesh->graph_version == g->graph_version + 1 &&
                      mesh->graph_head == (g->graph_head + 1) % 120;
         uint32_t first = single ? (mesh->graph_head + 119) % 120 : 0;
-        unpack_capture(g, unpack);
-        g->TexSubImage2D(TEXTURE_2D, 0, (GLint)first, 63, single ? 1 : 120, 1, 0x1908, 0x1401,
-                         mesh->graph_data[first]);
-        unpack_restore(g, unpack);
+        size_t bytes = single ? 4 : sizeof(mesh->graph_data);
+        if (memcmp(g->cached_mesh.graph_data[first], mesh->graph_data[first], bytes)) {
+            unpack_capture(g, unpack);
+            g->TexSubImage2D(TEXTURE_2D, 0, (GLint)first, 63, single ? 1 : 120, 1, 0x1908, 0x1401,
+                             mesh->graph_data[first]);
+            unpack_restore(g, unpack);
+            memcpy(g->cached_mesh.graph_data[first], mesh->graph_data[first], bytes);
+        }
         g->graph_epoch = mesh->graph_epoch;
         g->graph_version = mesh->graph_version;
     }
@@ -681,7 +685,8 @@ done:
         g->DeleteRenderbuffers(1, &color);
     return ok;
 }
-spo_result spo_backend_draw(const spo_mesh *mesh, uint32_t width, uint32_t height, uint32_t *draws) {
+spo_result spo_backend_draw(const spo_mesh *mesh, uint32_t width, uint32_t height,
+                            uint32_t *draws) {
     spo_gl *g = spo->renderer;
     gl_state state;
     if (!g)
