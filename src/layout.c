@@ -550,7 +550,7 @@ static spo_result menu(uint32_t width, uint32_t height) {
     y += m.pady + m.bar + 10;
     if (spo->tab == spo_menu_tabs() - 1) {
         char port[160], renderer[96];
-        const char *about[] = {port, renderer, "Overlay   sbc-port-overlay " SPO_VERSION " (MIT)",
+        const char *about[] = {port, renderer, "Overlay   Producdevity/sbc-port-overlay " SPO_VERSION " (MIT)",
                                "Font      Spleen (BSD-2-Clause)", NULL};
         snprintf(port, sizeof(port), "Port      %s %s", spo->name, spo->version);
         snprintf(renderer, sizeof(renderer), "Renderer  %s", spo->renderer_name);
