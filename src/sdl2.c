@@ -47,8 +47,12 @@ int32_t spo_handle_sdl_event(const union SDL_Event *event) {
         return 0;
     case SDL_CONTROLLERDEVICEADDED: {
         SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(event->cdevice.which);
-        if (id >= 0)
+        /* The application opens the controller after this event; until then it has no state
+           to read, and a new device has nothing held. */
+        if (id >= 0 && SDL_GameControllerFromInstanceID(id))
             sync_controller(id);
+        else if (id >= 0)
+            (void)spo_input_sync((uint32_t)id, 0, NULL);
         return 0;
     }
     case SDL_CONTROLLERDEVICEREMAPPED:
