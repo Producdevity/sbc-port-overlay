@@ -27,6 +27,10 @@ A saved value replaces the default when the option is registered. Your
 `on_change` callback runs at registration and on every change. Return an
 error to reject the value.
 
+`spo_notice(text)` shows up to 80 bytes under the menu's help text for 4 s,
+for example the result of an action. A settings error shown there takes
+precedence. It may be called from an `on_action` callback.
+
 ## Counters and indicators
 
 Up to 8 of each.

@@ -488,6 +488,9 @@ static const char *menu_error(void) {
            : spo->error == SPO_IO       ? "Could not save settings"
                                         : "Settings error";
 }
+static const char *menu_notice(void) {
+    return spo->notice[0] && spo_now() - spo->notice_at < SPO_NOTICE_NS ? spo->notice : NULL;
+}
 typedef struct {
     int glyph;
     const char *word;
@@ -533,7 +536,7 @@ static int menu_footer(const menu_plan *m, int x, int y) {
 static spo_result menu(uint32_t width, uint32_t height) {
     int size = height >= 720 ? 3 : 2, x, y;
     menu_plan m;
-    const char *error;
+    const char *error, *notice;
     while (!menu_fit(&m, size, width, height) && size > 1)
         size--;
     if (m.cols < 24 || m.h > (int)height - 16)
@@ -570,9 +573,11 @@ static spo_result menu(uint32_t width, uint32_t height) {
         return SPO_CAPACITY;
     y += SPO_MENU_ROWS * m.rowh + 6;
     error = menu_error();
+    notice = error ? NULL : menu_notice();
     if (!wrapped(&m, x + m.padx, y, spo_menu_help(spo->cursor), palette[SPO_TONE_LABEL],
-                 error ? 1 : 2) ||
-        (error && !text(x + m.padx, y + m.ch, error, palette[SPO_TONE_BAD], 255)))
+                 error || notice ? 1 : 2) ||
+        (error && !text(x + m.padx, y + m.ch, error, palette[SPO_TONE_BAD], 255)) ||
+        (notice && !wrapped(&m, x + m.padx, y + m.ch, notice, palette[SPO_TONE_GOOD], 1)))
         return SPO_CAPACITY;
     y += 2 * m.ch + 6;
     return menu_footer(&m, x, y) ? SPO_OK : SPO_CAPACITY;

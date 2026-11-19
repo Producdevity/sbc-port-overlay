@@ -94,6 +94,8 @@ typedef struct {
     uint32_t counter_mask, indicator_mask;
     int frozen, lost, dirty, saving, in_callback;
     spo_result error;
+    char notice[81];
+    uint64_t notice_at;
     spo_pad pads[4];
     int open, drain, tab, cursor, scroll;
     uint64_t intervals[SPO_HISTORY], last_stamp, window_ns, refresh_stamp, history_serial;
@@ -151,6 +153,7 @@ uint32_t spo_preset_items(uint32_t);
 void spo_numeric_refresh(uint64_t);
 enum { SPO_ROW_NONE, SPO_ROW_HEADING, SPO_ROW_TOGGLE, SPO_ROW_CHOICE, SPO_ROW_SLIDER, SPO_ROW_ACTION };
 #define SPO_MENU_ROWS 10
+#define SPO_NOTICE_NS UINT64_C(4000000000)
 typedef struct {
     int kind;
     char label[40], value[40];

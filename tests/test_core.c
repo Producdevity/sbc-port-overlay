@@ -25,6 +25,7 @@ static void action(spo_id id, void *user) {
     (void)id;
     (void)user;
     action_calls++;
+    assert(spo_notice("Ran") == SPO_OK);
 }
 static spo_config config(const char *path) {
     spo_config c = {0};
@@ -542,6 +543,7 @@ static void persistence(void) {
 }
 static void actions(void) {
     spo_id page, id;
+    uint32_t count;
     spo_page_desc p = {sizeof(p), "test", "Test"};
     spo_option_desc d = {0};
     reset();
@@ -565,7 +567,17 @@ static void actions(void) {
     assert(action_calls == 1);
     spo_handle_input(1, SPO_SOUTH, 0);
     spo_input_tick(UINT64_MAX);
-    assert(action_calls == 1);
+    assert(action_calls == 1 && !strcmp(spo->notice, "Ran"));
+    assert(spo_notice(NULL) == SPO_INVALID);
+    spo->error = SPO_OK;
+    spo->notice_at -= SPO_NOTICE_NS;
+    assert(spo_layout(640, 480) == SPO_OK);
+    count = spo->mesh.count;
+    assert(spo_notice("Done") == SPO_OK && !strcmp(spo->notice, "Done"));
+    assert(spo_layout(640, 480) == SPO_OK && spo->mesh.count > count);
+    spo->notice_at -= SPO_NOTICE_NS;
+    assert(spo_layout(640, 480) == SPO_OK && spo->mesh.count == count);
+    spo_set_open(0);
 }
 static void timing(void) {
     uint32_t i;

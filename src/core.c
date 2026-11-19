@@ -419,6 +419,16 @@ spo_result spo_target_fps_set(uint32_t fps) {
     spo->formatted_at = 0;
     return SPO_OK;
 }
+/* Allowed inside an action callback, the usual caller. */
+spo_result spo_notice(const char *text) {
+    if (!spo)
+        return SPO_NOT_INITIALIZED;
+    if (!text)
+        return spo_fail(SPO_INVALID);
+    snprintf(spo->notice, sizeof(spo->notice), "%s", text);
+    spo->notice_at = spo_now();
+    return SPO_OK;
+}
 spo_result spo_preset_set(uint32_t preset) {
     if (!usable())
         return SPO_NOT_INITIALIZED;
