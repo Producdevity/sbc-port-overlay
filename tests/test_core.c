@@ -925,6 +925,152 @@ static void menu_layout(void) {
     }
     spo_set_open(0);
 }
+static struct {
+    int available, live, routed_calls, submits, nulls, closes;
+    uint32_t width, height, last_count;
+} fake;
+static int fake_available(void) {
+    return fake.available;
+}
+static int fake_routed(int show, uint32_t *w, uint32_t *h) {
+    fake.routed_calls++;
+    if (!fake.live || !show)
+        return fake.live;
+    *w = fake.width;
+    *h = fake.height;
+    return 1;
+}
+static void fake_submit(const spo_mesh *mesh) {
+    if (!mesh) {
+        fake.nulls++;
+        return;
+    }
+    fake.submits++;
+    fake.last_count = mesh->count;
+}
+static void fake_close(void) {
+    fake.closes++;
+}
+static const spo_sink fake_sink = {fake_available, fake_routed, fake_submit, fake_close};
+static int point(uint32_t phase, int x, int y) {
+    return spo_ui_pointer(phase, x, y);
+}
+static void tap_at(int x, int y) {
+    assert(point(SPO_TOUCH_DOWN, x, y) == 1);
+    assert(point(SPO_TOUCH_UP, x, y) == 1);
+}
+static void second_screen(void) {
+    char path[] = "/tmp/spo-screen-XXXXXX";
+    int fd = mkstemp(path);
+    spo_config c = config(path);
+    spo_menu_row row;
+    assert(fd >= 0);
+    close(fd);
+    spo_shutdown();
+    assert(spo_init(&c) == SPO_OK);
+    /* No sink: one tab row fewer, nothing routed. */
+    assert(spo_menu_rows() == 6);
+    memset(&fake, 0, sizeof(fake));
+    spo_sink_set(&fake_sink);
+    assert(spo_menu_rows() == 6);
+    fake.available = 1;
+    assert(spo_menu_rows() == 7);
+    /* The HUD is laid out for the second screen and handed over, not drawn here. */
+    fake.live = 1;
+    fake.width = 640;
+    fake.height = 480;
+    spo_preset_set(1);
+    assert(spo_frame(1280, 720) == SPO_OK);
+    assert(spo->routed && fake.submits == 1 && fake.last_count > 0);
+    assert(spo->mesh_width == 640 && spo->mesh_height == 480);
+    spo_preset_set(0);
+    assert(spo_frame(1280, 720) == SPO_OK && fake.submits == 2 && fake.last_count == 0);
+    /* The window is not ready yet: the HUD stays on the game screen at the game's size. */
+    fake.live = 0;
+    spo_preset_set(1);
+    assert(spo_frame(1280, 720) == SPO_OK);
+    assert(!spo->routed && fake.nulls == 1 && spo->mesh_width == 1280);
+    fake.live = 1;
+    assert(spo_frame(1280, 720) == SPO_OK && spo->routed);
+    /* Menu: the setting is a row on the Overlay tab and switches the HUD back. */
+    spo_set_open(1);
+    spo->cursor = 6;
+    spo_menu_describe(6, &row);
+    assert(!strcmp(row.label, "Screen") && !strcmp(row.value, "Second") && row.kind == SPO_ROW_CHOICE);
+    spo_menu_button(SPO_RIGHT);
+    spo_menu_describe(6, &row);
+    assert(!strcmp(row.value, "Game") && spo->screen_mode == 1 && spo->dirty);
+    fake.routed_calls = 0;
+    assert(spo_frame(640, 480) == SPO_OK);
+    assert(!spo->routed && fake.routed_calls == 0 && fake.nulls == 2);
+    spo_menu_button(SPO_LEFT);
+    assert(spo->screen_mode == 0);
+    spo_menu_button(SPO_RIGHT);
+    spo_set_open(0);
+    assert(spo_config_save() == SPO_OK);
+    spo_shutdown();
+    assert(fake.closes == 1);
+    assert(spo_init(&c) == SPO_OK && spo->screen_mode == 1);
+    spo_shutdown();
+    unlink(path);
+}
+static void touch_menu(void) {
+    spo_config c = config(NULL);
+    const spo_hit *h;
+    spo_menu_row row;
+    spo_shutdown();
+    assert(spo_init(&c) == SPO_OK);
+    memset(&fake, 0, sizeof(fake));
+    spo_sink_set(&fake_sink);
+    fake.available = fake.live = 1;
+    fake.width = 640;
+    fake.height = 480;
+    assert(point(SPO_TOUCH_DOWN, 10, 10) == 0);
+    spo_set_open(1);
+    assert(spo_frame(1280, 720) == SPO_OK);
+    h = &spo->hit;
+    assert(h->valid && h->tabs >= 2 && h->rowh > 0 && spo->panel.x + spo->panel.w <= 640);
+    /* A tab. */
+    tap_at(h->tab[1].x + 2, h->tab[1].y + 2);
+    assert(spo->tab == h->tab_index[1] && spo->tab == 1);
+    spo_frame(1280, 720);
+    /* Show tab: a toggle row acts on the first tap. */
+    h = &spo->hit;
+    spo_menu_describe(1, &row);
+    assert(row.kind == SPO_ROW_TOGGLE);
+    {
+        uint32_t before = spo->overlay.items;
+        tap_at(h->rows_x + 20, h->rows_y + h->rowh + 2);
+        assert(spo->cursor == 1 && spo->overlay.items != before);
+    }
+    /* A drag scrolls instead of tapping. */
+    {
+        uint32_t before = spo->overlay.items;
+        assert(spo_menu_rows() > SPO_MENU_ROWS && spo->scroll == 0);
+        point(SPO_TOUCH_DOWN, h->rows_x + 20, h->rows_y + 6 * h->rowh);
+        point(SPO_TOUCH_MOVE, h->rows_x + 20, h->rows_y + 3 * h->rowh);
+        point(SPO_TOUCH_UP, h->rows_x + 20, h->rows_y + 3 * h->rowh);
+        assert(spo->scroll == 3 && spo->overlay.items == before);
+    }
+    /* Overlay tab: first tap selects a choice row, the next changes it by half. */
+    spo->tab = 0;
+    spo_menu_home();
+    spo_frame(1280, 720);
+    h = &spo->hit;
+    tap_at(h->rows_x + 20, h->rows_y + 3 * h->rowh + 2);
+    assert(spo->cursor == 3);
+    {
+        uint32_t before = spo->overlay.background_opacity;
+        tap_at(h->rows_x + h->rows_w - 20, h->rows_y + 3 * h->rowh + 2);
+        assert(spo->overlay.background_opacity == before + 5);
+        tap_at(h->rows_x + 20, h->rows_y + 3 * h->rowh + 2);
+        assert(spo->overlay.background_opacity == before);
+    }
+    /* Outside the panel closes the menu. */
+    tap_at(1, 1);
+    assert(!spo_menu_is_open());
+    spo_shutdown();
+}
 int main(void) {
     input();
     snapshots();
@@ -947,6 +1093,8 @@ int main(void) {
     graph_colour();
     layouts();
     menu_layout();
+    second_screen();
+    touch_menu();
     malformed_config();
     spo_shutdown();
     puts("core: input, anchors, presets, parsers, persistence, callbacks and timing passed");

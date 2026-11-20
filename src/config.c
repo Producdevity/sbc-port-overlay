@@ -150,6 +150,7 @@ spo_result spo_config_load(void) {
         spo->overlay.graph_samples = 120;
         spo->error = SPO_INVALID;
     }
+    spo->screen_mode = get_range("screen", 0, 0, 1);
     spo->fps_config_low = get_range("fps_low", 30, 1, 1000);
     spo->fps_config_high = get_range("fps_high", 60, 1, 1000);
     if (spo->fps_config_low >= spo->fps_config_high) {
@@ -201,6 +202,7 @@ static int snapshot(void) {
         !spo_ini_put("spo", "background_opacity", (int32_t)o->background_opacity) ||
         !spo_ini_put("spo", "text_opacity", (int32_t)o->text_opacity) ||
         !spo_ini_put("spo", "graph_samples", (int32_t)o->graph_samples) ||
+        !spo_ini_put("spo", "screen", spo->screen_mode) ||
         !spo_ini_put("spo", "fps_low", (int32_t)spo->fps_config_low) ||
         !spo_ini_put("spo", "fps_high", (int32_t)spo->fps_config_high))
         return 0;

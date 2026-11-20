@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "spo.h"
 #include <SDL.h>
+#include <stddef.h>
 static const spo_button buttons[] = {
     SPO_SOUTH, SPO_EAST, SPO_WEST,    SPO_NORTH,   SPO_SELECT,  SPO_GUIDE,   SPO_START,
     SPO_L3,    SPO_R3,   SPO_L1,      SPO_R1,      SPO_UP,      SPO_DOWN,    SPO_LEFT,
@@ -26,9 +27,14 @@ static void sync_controller(SDL_JoystickID id) {
         values[axes[i]] = SDL_GameControllerGetAxis(controller, (SDL_GameControllerAxis)i);
     spo_input_sync((uint32_t)id, held, values);
 }
+#include "screen.c"
 int32_t spo_handle_sdl_event(const union SDL_Event *event) {
+    int32_t consumed;
     if (!event)
         return 0;
+    debug_event(event);
+    if (screen_event(event, &consumed))
+        return consumed;
     switch (event->type) {
     case SDL_CONTROLLERBUTTONDOWN:
     case SDL_CONTROLLERBUTTONUP:

@@ -5,6 +5,8 @@
 - Any GL state the backend touches is saved and restored. Add new state to
   `tests/test_gl.c`.
 - Keep GL and SDL types out of `spo.h`.
+- The second screen never draws, swaps or waits on the game thread; the game
+  thread only lays out and copies a mesh.
 
 ## Tests
 
@@ -17,7 +19,7 @@ The GLES tests need Mesa, so they run in Docker:
 ```sh
 docker build -f tools/Dockerfile -t spo-dev .
 docker run --rm -v "$PWD:/work" spo-dev sh -c \
-  'cmake -S . -B build-linux -G Ninja -DSPO_BUILD_GL_TESTS=ON && cmake --build build-linux && ctest --test-dir build-linux'
+  'cmake -S . -B build-linux -G Ninja -DSPO_BUILD_GL_TESTS=ON -DSPO_BUILD_SDL2=ON && cmake --build build-linux && ctest --test-dir build-linux'
 ```
 
 Run the sampler tests under ThreadSanitizer when you change the sampler.

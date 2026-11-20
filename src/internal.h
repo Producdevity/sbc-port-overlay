@@ -82,6 +82,21 @@ typedef struct {
     int valid;
 } spo_metric;
 typedef struct spo_sampler spo_sampler;
+/* The second screen, supplied by the SDL adapter (src/screen.c). routed() reports whether the
+   overlay is laid out for it and gives its size; it may open the window when something is
+   shown. submit(NULL) says the overlay no longer goes there. */
+typedef struct spo_sink {
+    int (*available)(void);
+    int (*routed)(int show, uint32_t *width, uint32_t *height);
+    void (*submit)(const spo_mesh *);
+    void (*close)(void);
+} spo_sink;
+#define SPO_TABS_MAX 16
+typedef struct {
+    int valid, rows_x, rows_y, rowh, rows_w, tabs;
+    spo_rect panel, tab[SPO_TABS_MAX];
+    int tab_index[SPO_TABS_MAX];
+} spo_hit;
 typedef struct {
     spo_config config;
     char path[4096], name[81], version[81], renderer_name[32];
@@ -140,6 +155,10 @@ typedef struct {
     double cpu_sum, wall_sum, cpu_max;
     uint32_t stats_frames, frame_reads;
     void *renderer;
+    const spo_sink *sink;
+    int screen_mode, routed;
+    spo_hit hit;
+    int touch_down, touch_drag, touch_x, touch_y, touch_scroll;
 } spo_context;
 extern spo_context *spo;
 uint64_t spo_now(void);
@@ -208,6 +227,14 @@ typedef struct {
 } spo_glyph;
 const spo_glyph *spo_glyph_get(uint32_t, int);
 void spo_glyph_raster(uint32_t, int, uint8_t *);
+typedef struct spo_gl spo_gl;
+SPO_API spo_gl *spo_gl_create(spo_get_proc_fn, void *, uint32_t);
+SPO_API const char *spo_gl_renderer(const spo_gl *);
+SPO_API void spo_gl_destroy(spo_gl *, int);
+SPO_API spo_result spo_gl_draw(spo_gl *, const spo_mesh *, uint32_t, uint32_t, uint32_t *);
+SPO_API void spo_attach_hook(void (*)(void));
+SPO_API void spo_sink_set(const spo_sink *);
+SPO_API int32_t spo_ui_pointer(uint32_t, int32_t, int32_t);
 spo_result spo_backend_init(void);
 void spo_backend_shutdown(void);
 spo_result spo_backend_draw(const spo_mesh *, uint32_t, uint32_t, uint32_t *);

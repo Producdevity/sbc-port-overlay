@@ -93,6 +93,60 @@ and GPU load) and Full (everything available). `spo_overlay_get` reports the
 preset that matches the toggles, or `custom` when none does; `spo_overlay_set`
 takes `items` and derives both.
 
+## Second screen
+
+On a handheld with two display panels the overlay and its menu go to the second
+screen instead of over the game. This needs `src/sdl2.c`, which a port already
+compiles for `spo_handle_sdl_event`, and an SDL window with a GL context on the
+thread that calls `spo_init`. A port needs no change for the overlay; a new pin
+and rebuild is enough.
+
+- Detection: two connected internal panels in `/sys/class/drm` (DSI, eDP, LVDS
+  or DPI connectors, so an HDMI display does not count), or
+  `DEVICE_HAS_DUAL_SCREEN` set to `Y`, `true` or `1`, under the Wayland or X11 SDL
+  driver. `SPO_SECOND_SCREEN=off` turns it off, `force` skips detection and the
+  check below. Output names and which panel is on top are never assumed.
+- The window is created when something is first shown, titled `Secondary`
+  (`SPO_SCREEN_TITLE` changes it) so that a compositor rule can send it to the
+  other output. If SDL does not report it on a different display than the game
+  window within three seconds, it is closed and the overlay stays over the game.
+- The window has its own GL context, shared with the game's, and its own thread.
+  The game thread lays the overlay out for the screen's size and copies the mesh
+  at most every 33 ms; the thread draws at 10 Hz, or 30 Hz with the menu open,
+  and swaps without waiting for vsync. The game never draws, swaps or waits
+  for it.
+- Output power: before opening, the outputs sway reports as powered off are read over its IPC socket
+  (`SWAYSOCK`, else `sway-ipc.*.sock` in `XDG_RUNTIME_DIR`). When the window closes, a small detached
+  process puts exactly those back with `output NAME power off`. It acts when the screen is closed or
+  the game exits, and also when the game is killed or crashes, because it waits on a pipe that only the
+  game holds. Nothing is changed without sway or when the output was already on.
+- With nothing to show for 1.5 s (overlay alone, not a port's screen) the window is closed; it opens
+  again, in about 5 to 30 ms, when something is shown.
+- The menu keeps its pad input. If the second screen is touched, a tap acts on
+  the tab or row under it, a drag over the rows scrolls and a tap outside the
+  panel closes the menu. The Overlay tab has a Screen row (Second or Game); it
+  is saved as `screen=0|1` in `[spo]` and only shows on a device with a second
+  screen.
+
+A port can draw its own content there:
+
+```c
+spo_screen_desc d = {sizeof d, 0, draw, touch, user, 30};
+if (spo_screen_open(&d) == SPO_OK) { /* draw runs on the screen's thread */ }
+```
+
+`draw(info, user)` runs with the screen's context current; the target is cleared
+first and the overlay is drawn after it. Textures and buffers of the game's
+context are visible; call `glFlush` on the game side before the screen reads
+what it wrote, and call `spo_screen_invalidate()` when there is something new
+(`max_hz` caps the rate). `touch(finger, phase, x, y, user)` gets `SPO_TOUCH_DOWN`,
+`MOVE` and `UP` with x and y from 0 to 1, from the thread that calls
+`spo_handle_sdl_event`, except while the menu is open. `spo_screen_info_get`
+reports the size and whether touch has arrived on this screen
+(`SPO_SCREEN_TOUCH`). `SPO_SCREEN_NO_OVERLAY` keeps the overlay on the game
+screen. `SPO_UNSUPPORTED` from `spo_screen_open` or `spo_screen_info_get` means a
+single-screen device: draw on the game screen as before.
+
 ## Config file
 
 ```ini
@@ -107,6 +161,7 @@ text_opacity=100
 graph_samples=120
 fps_low=30
 fps_high=60
+screen=0
 
 [spo.items]
 fps=1

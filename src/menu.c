@@ -89,9 +89,12 @@ const char *spo_menu_tab_label(int tab) {
         return spo->pages[tab - 2].label;
     return "About";
 }
+static int screen_row(void) {
+    return spo->sink && spo->sink->available();
+}
 int spo_menu_rows(void) {
     if (spo->tab == 0)
-        return 6;
+        return screen_row() ? 7 : 6;
     if (spo->tab == 1)
         return show_entries(-1, NULL);
     if (spo->tab - 2 < (int)spo->page_count)
@@ -113,13 +116,16 @@ void spo_menu_describe(int row, spo_menu_row *r) {
                                             "Size",
                                             "Background opacity",
                                             "Text opacity",
-                                            "Graph length"};
+                                            "Graph length",
+                                            "Screen"};
         const spo_overlay_settings *o = &spo->overlay;
-        if (row < 0 || row >= 6)
+        if (row < 0 || row >= (screen_row() ? 7 : 6))
             return;
         snprintf(r->label, sizeof(r->label), "%s", names[row]);
-        r->kind = row < 2 ? SPO_ROW_CHOICE : SPO_ROW_SLIDER;
-        if (row == 0)
+        r->kind = row < 2 || row == 6 ? SPO_ROW_CHOICE : SPO_ROW_SLIDER;
+        if (row == 6)
+            snprintf(r->value, sizeof(r->value), "%s", spo->screen_mode ? "Game" : "Second");
+        else if (row == 0)
             snprintf(r->value, sizeof(r->value), "%s", o->custom ? "Custom" : preset_names[o->preset]);
         else if (row == 1)
             snprintf(r->value, sizeof(r->value), "%s", anchor_names[o->anchor]);
@@ -283,6 +289,8 @@ static void change(int dir, int activate) {
             o->background_opacity = clamp_step(o->background_opacity, dir, 5, 0, 100);
         else if (row == 4)
             o->text_opacity = clamp_step(o->text_opacity, dir, 5, 10, 100);
+        else if (row == 6)
+            spo->screen_mode = !spo->screen_mode;
         else
             o->graph_samples = clamp_step(o->graph_samples, dir, 30, 30, 120);
         spo->dirty = 1;
@@ -332,6 +340,67 @@ void spo_menu_button(spo_button button) {
         change(1, 0);
     else if (button == SPO_SOUTH)
         change(1, 1);
+}
+static int hit(const spo_rect *r, int x, int y) {
+    return x >= r->x && y >= r->y && x < r->x + r->w && y < r->y + r->h;
+}
+static void tap(int x, int y) {
+    const spo_hit *h = &spo->hit;
+    int i, rows = spo_menu_rows(), row;
+    spo_menu_row r;
+    if (!hit(&h->panel, x, y)) {
+        spo_set_open(0);
+        return;
+    }
+    for (i = 0; i < h->tabs; i++)
+        if (hit(&h->tab[i], x, y)) {
+            spo->tab = h->tab_index[i];
+            spo_menu_home();
+            return;
+        }
+    if (y < h->rows_y || y >= h->rows_y + SPO_MENU_ROWS * h->rowh)
+        return;
+    row = spo->scroll + (y - h->rows_y) / h->rowh;
+    if (row >= rows)
+        return;
+    spo_menu_describe(row, &r);
+    if (!r.enabled || r.kind == SPO_ROW_HEADING || r.kind == SPO_ROW_NONE)
+        return;
+    if (r.kind == SPO_ROW_TOGGLE || r.kind == SPO_ROW_ACTION) {
+        spo->cursor = row;
+        spo_menu_button(SPO_SOUTH);
+    } else if (row == spo->cursor)
+        spo_menu_button(x < h->rows_x + h->rows_w / 2 ? SPO_LEFT : SPO_RIGHT);
+    else
+        spo->cursor = row;
+}
+/* phase: 0 down, 1 move, 2 up; x and y are pixels of the surface the menu was laid out for. A tap
+   acts on the row, tab or panel edge under it; a vertical drag over the rows scrolls them. */
+int32_t spo_ui_pointer(uint32_t phase, int32_t x, int32_t y) {
+    const spo_hit *h;
+    if (!spo || !spo->open || !spo->hit.valid)
+        return 0;
+    h = &spo->hit;
+    if (phase == 0) {
+        spo->touch_down = 1;
+        spo->touch_drag = 0;
+        spo->touch_x = x;
+        spo->touch_y = y;
+        spo->touch_scroll = spo->scroll;
+    } else if (phase == 1 && spo->touch_down && h->rowh > 0) {
+        int dy = y - spo->touch_y, rows = spo_menu_rows(), top = rows - SPO_MENU_ROWS;
+        if (dy > h->rowh / 2 || dy < -h->rowh / 2)
+            spo->touch_drag = 1;
+        if (spo->touch_drag && top > 0) {
+            int at = spo->touch_scroll - dy / h->rowh;
+            spo->scroll = at < 0 ? 0 : at > top ? top : at;
+        }
+    } else if (phase == 2 && spo->touch_down) {
+        spo->touch_down = 0;
+        if (!spo->touch_drag)
+            tap(x, y);
+    }
+    return 1;
 }
 int spo_menu_repeats(spo_button button) {
     if (button == SPO_UP || button == SPO_DOWN)

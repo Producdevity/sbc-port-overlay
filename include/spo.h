@@ -35,7 +35,8 @@ enum {
     SPO_CONTEXT_LOST = -9,
     SPO_REJECTED = -10,
     SPO_THREAD_UNAVAILABLE = -11,
-    SPO_BUSY = -12
+    SPO_BUSY = -12,
+    SPO_UNSUPPORTED = -13
 };
 enum {
     SPO_GUIDE,
@@ -181,6 +182,33 @@ SPO_API spo_result spo_target_fps_set(uint32_t);
 SPO_API spo_result spo_notice(const char *);
 union SDL_Event;
 SPO_API int32_t spo_handle_sdl_event(const union SDL_Event *);
+/* Second screen, provided by the SDL adapter (src/sdl2.c). The overlay opens it by itself on a
+   device with two display panels and draws there instead of over the game; these calls are for a
+   port that wants to draw its own content on it. */
+enum { SPO_TOUCH_DOWN, SPO_TOUCH_MOVE, SPO_TOUCH_UP };
+enum { SPO_SCREEN_TOUCH = 1, SPO_SCREEN_NO_OVERLAY = 2 };
+typedef struct spo_screen_info {
+    uint32_t struct_size, width, height, flags; /* flags: SPO_SCREEN_TOUCH once a touch arrived */
+} spo_screen_info;
+/* Runs on the screen's own thread with its GL context current; that context shares objects with
+   the game's. The target is cleared first; the overlay draws afterwards. Flush the game's context
+   before the screen reads what it wrote. */
+typedef void (*spo_screen_draw_fn)(const spo_screen_info *, void *);
+/* Called from spo_handle_sdl_event; x and y run 0..1 across the screen. */
+typedef void (*spo_screen_touch_fn)(uint32_t finger, uint32_t phase, float x, float y, void *);
+typedef struct spo_screen_desc {
+    uint32_t struct_size, flags; /* SPO_SCREEN_NO_OVERLAY keeps the overlay on the game screen */
+    spo_screen_draw_fn draw;
+    spo_screen_touch_fn touch;
+    void *user;
+    uint32_t max_hz; /* draw rate cap, 0 for 30 */
+} spo_screen_desc;
+/* After spo_init, on the thread where the game's GL context is current. SPO_UNSUPPORTED: there is
+   no second screen, or SPO_SECOND_SCREEN=off, or it could not be opened. */
+SPO_API spo_result spo_screen_open(const spo_screen_desc *);
+SPO_API void spo_screen_close(void);
+SPO_API spo_result spo_screen_info_get(spo_screen_info *);
+SPO_API void spo_screen_invalidate(void); /* any thread: draw again soon */
 #ifdef __cplusplus
 }
 #endif

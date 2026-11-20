@@ -72,7 +72,10 @@ typedef ptrdiff_t GLsizeiptr, GLintptr;
     X(void, ColorMask, (GLboolean, GLboolean, GLboolean, GLboolean))                               \
     X(void, DrawArrays, (GLenum, GLint, GLsizei))
 #define DECL(ret, name, args) ret(*name) args;
-typedef struct {
+struct spo_gl {
+    spo_get_proc_fn get_proc;
+    void *get_user;
+    char renderer[32];
     PROCS(DECL)
     void (*BindVertexArray)(GLuint);
     void (*GenVertexArrays)(GLsizei, GLuint *);
@@ -96,7 +99,7 @@ typedef struct {
         spo_vertex vertices[3][SPO_QUADS * 6];
         uint32_t quads[3][SPO_QUADS * 4];
     } uploaded;
-} spo_gl;
+};
 _Static_assert(sizeof(spo_context) + sizeof(spo_gl) < 1024 * 1024, "CPU storage budget");
 #undef DECL
 enum { ARRAY_BUFFER = 0x8892, TEXTURE_2D = 0x0de1, TEXTURE0 = 0x84c0 };
@@ -129,8 +132,8 @@ static int extension(const char *all, const char *needle) {
     }
     return 0;
 }
-static int load(void *out, size_t size, const char *name) {
-    void *p = spo->config.get_proc_address(name, spo->config.gl_user);
+static int load(const spo_gl *g, void *out, size_t size, const char *name) {
+    void *p = g->get_proc(name, g->get_user);
     if (!p || size != sizeof(p))
         return 0;
     memcpy(out, &p, size);
@@ -310,7 +313,7 @@ static void upload_font(spo_gl *g, uint32_t size) {
     unpack_restore(g, unpack);
     g->font = size < 1 ? 1 : size > 4 ? 4 : size;
 }
-spo_result spo_backend_init(void) {
+spo_gl *spo_gl_create(spo_get_proc_fn get_proc, void *user, uint32_t font) {
     spo_gl *g = calloc(1, sizeof(*g));
     gl_state state;
     int major = 2, minor = 0, unpack_saved = 0;
@@ -331,10 +334,11 @@ spo_result spo_backend_init(void) {
         "}else{a=SAMPLE(atlas,t).a*c.a;}OUTPUT=vec4(rgb*a,a);}";
     char fragment_source[2048];
     if (!g)
-        return SPO_CAPACITY;
-    spo->renderer = g;
+        return NULL;
+    g->get_proc = get_proc;
+    g->get_user = user;
 #define LOAD(ret, name, args)                                                                      \
-    if (!load(&g->name, sizeof(g->name), "gl" #name))                                              \
+    if (!load(g, &g->name, sizeof(g->name), "gl" #name))                                           \
         goto unavailable;
     PROCS(LOAD)
 #undef LOAD
@@ -350,31 +354,31 @@ spo_result spo_backend_init(void) {
     }
     g->es3 = major >= 3;
     if (strstr(version, "gl4es") || strstr(version, "GL4ES"))
-        spo_text_copy(spo->renderer_name, sizeof(spo->renderer_name), "gl4es (GLES2)");
+        spo_text_copy(g->renderer, sizeof(g->renderer), "gl4es (GLES2)");
     else
-        snprintf(spo->renderer_name, sizeof(spo->renderer_name), "GLES %d.%d", major, minor);
+        snprintf(g->renderer, sizeof(g->renderer), "GLES %d.%d", major, minor);
     g->sample_mask = major > 3 || (major == 3 && minor >= 1);
     extensions = (const char *)g->GetString(0x1f03);
     g->unpack_subimage = g->es3 || extension(extensions, "GL_EXT_unpack_subimage") ||
-                         strstr(spo->renderer_name, "gl4es") != NULL;
+                         strstr(g->renderer, "gl4es") != NULL;
     if (g->es3 || extension(extensions, "GL_OES_vertex_array_object")) {
         const char *suffix = g->es3 ? "" : "OES";
         char name[64];
         snprintf(name, sizeof(name), "glBindVertexArray%s", suffix);
-        if (!load(&g->BindVertexArray, sizeof(g->BindVertexArray), name))
+        if (!load(g, &g->BindVertexArray, sizeof(g->BindVertexArray), name))
             goto unavailable;
         snprintf(name, sizeof(name), "glGenVertexArrays%s", suffix);
-        if (!load(&g->GenVertexArrays, sizeof(g->GenVertexArrays), name))
+        if (!load(g, &g->GenVertexArrays, sizeof(g->GenVertexArrays), name))
             goto unavailable;
         snprintf(name, sizeof(name), "glDeleteVertexArrays%s", suffix);
-        if (!load(&g->DeleteVertexArrays, sizeof(g->DeleteVertexArrays), name))
+        if (!load(g, &g->DeleteVertexArrays, sizeof(g->DeleteVertexArrays), name))
             goto unavailable;
     }
-    if (g->es3 && !load(&g->BindSampler, sizeof(g->BindSampler), "glBindSampler"))
+    if (g->es3 && !load(g, &g->BindSampler, sizeof(g->BindSampler), "glBindSampler"))
         goto unavailable;
     if (g->es3) {
 #define EXTRA(name)                                                                                \
-    if (!load(&g->name, sizeof(g->name), "gl" #name))                                              \
+    if (!load(g, &g->name, sizeof(g->name), "gl" #name))                                           \
     goto unavailable
         EXTRA(GetIntegeri_v);
         EXTRA(GetInteger64i_v);
@@ -444,7 +448,7 @@ spo_result spo_backend_init(void) {
     g->attribute_slot = UINT32_MAX;
     g->graph_epoch = UINT32_MAX;
     g->graph_count = UINT32_MAX;
-    g->stride = (uint32_t)sizeof(spo->mesh.vertices);
+    g->stride = (uint32_t)sizeof(((spo_mesh *)0)->vertices);
     if (g->es3) {
         GLint alignment = 0;
         GLuint block = g->GetUniformBlockIndex(g->program, "Mesh");
@@ -473,7 +477,7 @@ spo_result spo_backend_init(void) {
         g->TexSubImage2D(TEXTURE_2D, 0, SPO_ATLAS_SOLID_X - 1, SPO_ATLAS_SOLID_Y - 1, 2, 2, 0x1908,
                          0x1401, solid);
     }
-    upload_font(g, spo->overlay.font_scale);
+    upload_font(g, font);
     unpack_restore(g, unpack);
     unpack_saved = 0;
     g->UseProgram(g->program);
@@ -481,23 +485,24 @@ spo_result spo_backend_init(void) {
     if (!warmup(g, &state))
         goto resource_failure;
     restore(g, &state);
-    return SPO_OK;
+    return g;
 resource_failure:
     if (unpack_saved)
         unpack_restore(g, unpack);
     restore(g, &state);
-    spo_backend_shutdown();
-    return SPO_GL_UNAVAILABLE;
+    spo_gl_destroy(g, 0);
+    return NULL;
 unavailable:
     free(g);
-    spo->renderer = NULL;
-    return SPO_GL_UNAVAILABLE;
+    return NULL;
 }
-void spo_backend_shutdown(void) {
-    spo_gl *g = spo->renderer;
+const char *spo_gl_renderer(const spo_gl *g) {
+    return g->renderer;
+}
+void spo_gl_destroy(spo_gl *g, int lost) {
     if (!g)
         return;
-    if (!spo->lost) {
+    if (!lost) {
         if (g->program)
             g->DeleteProgram(g->program);
         if (g->texture)
@@ -508,7 +513,6 @@ void spo_backend_shutdown(void) {
             g->DeleteVertexArrays(1, &g->vao);
     }
     free(g);
-    spo->renderer = NULL;
 }
 static void prepare(spo_gl *g, gl_state *state, uint32_t width, uint32_t height) {
     int i, n = g->sample_mask ? 9 : g->es3 ? 8 : 7;
@@ -713,9 +717,8 @@ done:
         g->DeleteRenderbuffers(1, &color);
     return ok;
 }
-spo_result spo_backend_draw(const spo_mesh *mesh, uint32_t width, uint32_t height,
-                            uint32_t *draws) {
-    spo_gl *g = spo->renderer;
+spo_result spo_gl_draw(spo_gl *g, const spo_mesh *mesh, uint32_t width, uint32_t height,
+                       uint32_t *draws) {
     gl_state state;
     if (!g)
         return SPO_GL_UNAVAILABLE;
@@ -731,4 +734,23 @@ spo_result spo_backend_draw(const spo_mesh *mesh, uint32_t width, uint32_t heigh
     *draws = 1;
     restore(g, &state);
     return SPO_OK;
+}
+spo_result spo_backend_init(void) {
+    spo_gl *g =
+        spo_gl_create(spo->config.get_proc_address, spo->config.gl_user, spo->overlay.font_scale);
+    if (!g)
+        return SPO_GL_UNAVAILABLE;
+    spo->renderer = g;
+    spo_text_copy(spo->renderer_name, sizeof(spo->renderer_name), spo_gl_renderer(g));
+    return SPO_OK;
+}
+void spo_backend_shutdown(void) {
+    spo_gl_destroy(spo->renderer, spo->lost);
+    spo->renderer = NULL;
+}
+spo_result spo_backend_draw(const spo_mesh *mesh, uint32_t width, uint32_t height,
+                            uint32_t *draws) {
+    if (!spo->renderer)
+        return SPO_GL_UNAVAILABLE;
+    return spo_gl_draw(spo->renderer, mesh, width, height, draws);
 }

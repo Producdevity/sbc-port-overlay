@@ -444,6 +444,10 @@ static int tab_bar(const menu_plan *m, int x, int y) {
     for (i = first; i <= last; i++) {
         const char *label = spo_menu_tab_label(i);
         int width = (int)strlen(label) * m->cw;
+        if (spo->hit.tabs < SPO_TABS_MAX) {
+            spo->hit.tab[spo->hit.tabs] = (spo_rect){left - m->cw, y - 1, width + 2 * m->cw, m->bar};
+            spo->hit.tab_index[spo->hit.tabs++] = i;
+        }
         if (i == spo->tab &&
             !rectangle(left - m->cw, y - 1, width + 2 * m->cw, m->bar - 2, highlight, 255))
             return 0;
@@ -545,6 +549,13 @@ static spo_result menu(uint32_t width, uint32_t height) {
     x = ((int)width - m.w) / 2;
     y = ((int)height - m.h) / 2;
     spo->panel = (spo_rect){x, y, m.w, m.h};
+    spo->hit.panel = spo->panel;
+    spo->hit.tabs = 0;
+    spo->hit.rows_x = x;
+    spo->hit.rows_w = m.w;
+    spo->hit.rows_y = y + m.pady + m.bar + 10;
+    spo->hit.rowh = m.rowh;
+    spo->hit.valid = 1;
     if (!rectangle(x, y, m.w, m.h, panel_color, 245))
         return SPO_CAPACITY;
     if (!tab_bar(&m, x, y + m.pady) ||
@@ -593,6 +604,7 @@ spo_result spo_layout(uint32_t width, uint32_t height) {
     plan p;
     spo->mesh.count = 0;
     spo->mesh.graph_scale = 0;
+    spo->hit.valid = 0;
     if (spo->open) {
         spo->mesh_formatted_at = 0;
         spo->mesh.revision++;

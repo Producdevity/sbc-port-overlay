@@ -101,6 +101,14 @@ void spo_overlay_sync(void) {
     }
     spo->overlay.custom = 1;
 }
+static void (*attach_hook)(void);
+void spo_attach_hook(void (*hook)(void)) {
+    attach_hook = hook;
+}
+void spo_sink_set(const spo_sink *sink) {
+    if (spo)
+        spo->sink = sink;
+}
 spo_result spo_init(const spo_config *c) {
     spo_result result;
     if (spo)
@@ -147,6 +155,8 @@ spo_result spo_init(const spo_config *c) {
             spo_shutdown();
             return result;
         }
+        if (attach_hook)
+            attach_hook();
     }
     return SPO_OK;
 }
@@ -155,6 +165,8 @@ void spo_shutdown(void) {
         return;
     if (spo->open)
         spo_set_open(0);
+    if (spo->sink)
+        spo->sink->close();
     spo_metrics_close();
     spo_backend_shutdown();
     free(spo);
@@ -514,12 +526,32 @@ spo_result spo_frame(uint32_t width, uint32_t height) {
     spo_input_tick(now);
     spo_metrics_request();
     spo_metrics_collect(now);
-    if (spo->overlay.items || spo->counter_mask || spo->indicator_mask || spo->open) {
-        result = spo_layout(width, height);
-        if (result == SPO_OK && spo->mesh.count && !(spo->config.flags & SPO_INIT_NO_RENDER))
-            result = spo_backend_draw(&spo->mesh, width, height, &draws);
-    } else
-        spo->mesh.count = 0;
+    {
+        int show = spo->overlay.items || spo->counter_mask || spo->indicator_mask || spo->open;
+        int render = !(spo->config.flags & SPO_INIT_NO_RENDER), routed = 0;
+        uint32_t target_w = width, target_h = height;
+        if (spo->sink && spo->screen_mode == 0 && spo->sink->available())
+            routed = spo->sink->routed(show, &target_w, &target_h) && target_w > 0 &&
+                     target_h > 0;
+        if (!routed && spo->routed) {
+            spo->sink->submit(NULL);
+            spo->mesh_width = spo->mesh_height = 0;
+        }
+        spo->routed = routed;
+        if (show) {
+            result = spo_layout(target_w, target_h);
+            if (result == SPO_OK) {
+                if (routed)
+                    spo->sink->submit(&spo->mesh);
+                else if (render && spo->mesh.count)
+                    result = spo_backend_draw(&spo->mesh, width, height, &draws);
+            }
+        } else {
+            spo->mesh.count = 0;
+            if (routed)
+                spo->sink->submit(&spo->mesh);
+        }
+    }
     end = spo_cpu_now();
     {
         double c = (double)(end - cpu) / 1000.0, w = (double)(spo_now() - start) / 1000.0;
