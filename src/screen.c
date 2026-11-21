@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: MIT */
-/* The second screen of a two-panel handheld, as a second SDL window. Included by sdl2.c so a port
-   that compiles that one file gets it. The window has its own GL context, shared with the game's,
-   and its own thread: the game thread only copies a mesh, never swaps or waits for it. */
+/* The second screen of a two-panel handheld, as a second SDL window. Included by sdl2.c and
+   sdl3.c, so a port that compiles one of them gets it. The window has its own GL context, shared
+   with the game's, and its own thread: the game thread only copies a mesh, never swaps or waits
+   for it. The SDL2 and SDL3 differences are in the block below. */
 #include "internal.h"
 #include <dirent.h>
 #include <stdarg.h>
@@ -15,6 +16,91 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <time.h>
+
+#ifdef SPO_SDL3
+typedef SDL_Mutex spo_mutex;
+typedef SDL_Condition spo_cond;
+typedef SDL_TouchFingerEvent finger_event;
+#undef SDL_CreateCond
+#undef SDL_DestroyCond
+#undef SDL_CondSignal
+#undef SDL_CondWaitTimeout
+#undef SDL_GL_DeleteContext
+#undef SDL_GL_GetDrawableSize
+#undef SDL_GLattr
+#define SDL_CreateCond SDL_CreateCondition
+#define SDL_DestroyCond SDL_DestroyCondition
+#define SDL_CondSignal SDL_SignalCondition
+#define SDL_CondWaitTimeout SDL_WaitConditionTimeout
+#define SDL_GL_DeleteContext SDL_GL_DestroyContext
+#define SDL_GL_GetDrawableSize SDL_GetWindowSizeInPixels
+#define SDL_GLattr SDL_GLAttr
+#define SPO_FINGER_DOWN SDL_EVENT_FINGER_DOWN
+#define SPO_FINGER_UP SDL_EVENT_FINGER_UP
+#define SPO_FINGER_MOTION SDL_EVENT_FINGER_MOTION
+#define SPO_MOUSE_DOWN SDL_EVENT_MOUSE_BUTTON_DOWN
+#define SPO_MOUSE_UP SDL_EVENT_MOUSE_BUTTON_UP
+#define SPO_MOUSE_MOTION SDL_EVENT_MOUSE_MOTION
+#define FINGER_ID(f) ((f)->fingerID)
+#define TOUCH_ID(f) ((f)->touchID)
+#define SPO_HINT_NO_ACTIVATION "SDL_WINDOW_ACTIVATE_WHEN_SHOWN", "0"
+static int finger_windows(void) {
+    return 1;
+}
+static int make_current(SDL_Window *w, SDL_GLContext c) {
+    return SDL_GL_MakeCurrent(w, c) ? 0 : -1;
+}
+static int get_attribute(SDL_GLAttr a, int *v) {
+    return SDL_GL_GetAttribute(a, v) ? 0 : -1;
+}
+/* Displays are numbered by SDL's IDs, which are never 0; SDL2 numbers them from 0. */
+static int window_display(SDL_Window *w) {
+    SDL_DisplayID id = SDL_GetDisplayForWindow(w);
+    return id ? (int)id : -1;
+}
+static int display_ids(int *ids, int max) {
+    int n = 0, i;
+    SDL_DisplayID *list = SDL_GetDisplays(&n);
+    if (!list)
+        return 0;
+    for (i = 0; i < n && i < max; i++)
+        ids[i] = (int)list[i];
+    SDL_free(list);
+    return i;
+}
+static int display_bounds(int id, SDL_Rect *r) {
+    return SDL_GetDisplayBounds((SDL_DisplayID)id, r) ? 0 : -1;
+}
+static SDL_Window *create_window(const char *title, int other, const SDL_Rect *bounds, int w, int h,
+                                 Uint64 flags) {
+    SDL_Window *window = SDL_CreateWindow(title, w, h, flags);
+    if (window && other >= 0) {
+        SDL_SetWindowPosition(window, bounds->x, bounds->y);
+        SDL_SetWindowFullscreen(window, true);
+    }
+    return window;
+}
+/* Sets *id to the window of a window event and *resized for a size change. */
+static int window_event(const SDL_Event *e, Uint32 *id, int *resized) {
+    if (e->type < SDL_EVENT_WINDOW_FIRST || e->type > SDL_EVENT_WINDOW_LAST)
+        return 0;
+    *id = e->window.windowID;
+    *resized = e->type == SDL_EVENT_WINDOW_RESIZED || e->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED;
+    return 1;
+}
+#else
+typedef SDL_mutex spo_mutex;
+typedef SDL_cond spo_cond;
+#define SPO_FINGER_DOWN SDL_FINGERDOWN
+#define SPO_FINGER_UP SDL_FINGERUP
+#define SPO_FINGER_MOTION SDL_FINGERMOTION
+#define SPO_MOUSE_DOWN SDL_MOUSEBUTTONDOWN
+#define SPO_MOUSE_UP SDL_MOUSEBUTTONUP
+#define SPO_MOUSE_MOTION SDL_MOUSEMOTION
+#define FINGER_ID(f) ((f)->fingerId)
+#define TOUCH_ID(f) ((f)->touchId)
+#define SPO_HINT_NO_ACTIVATION "SDL_WINDOW_NO_ACTIVATION_WHEN_SHOWN", "1"
+#endif
 
 enum { SCREEN_NONE, SCREEN_OPENING, SCREEN_LIVE, SCREEN_FAILED };
 #define SCREEN_FINGERS 10
@@ -30,8 +116,8 @@ typedef struct {
     SDL_GLContext context, game_context;
     Uint32 window_id, opened_at, last_submit, last_draw;
     SDL_Thread *thread;
-    SDL_mutex *lock;
-    SDL_cond *wake;
+    spo_mutex *lock;
+    spo_cond *wake;
     uint32_t width, height, flags;
     int logical_w, logical_h;
     spo_mesh *pending, *working;
@@ -42,6 +128,7 @@ typedef struct {
     int mouse_down;
 } screen_state;
 static screen_state screen;
+#ifndef SPO_SDL3
 /* SDL_TouchFingerEvent gained windowID in 2.0.12 by appending a field; a port built against older
    headers still runs on a newer library, so read it through this layout when the library has it. */
 typedef struct {
@@ -56,6 +143,45 @@ static int finger_windows(void) {
     SDL_GetVersion(&v);
     return SDL_VERSIONNUM(v.major, v.minor, v.patch) >= SDL_VERSIONNUM(2, 0, 12);
 }
+static int make_current(SDL_Window *w, SDL_GLContext c) {
+    return SDL_GL_MakeCurrent(w, c);
+}
+static int get_attribute(SDL_GLattr a, int *v) {
+    return SDL_GL_GetAttribute(a, v);
+}
+static int window_display(SDL_Window *w) {
+    return SDL_GetWindowDisplayIndex(w);
+}
+static int display_ids(int *ids, int max) {
+    int n = SDL_GetNumVideoDisplays(), i;
+    for (i = 0; i < n && i < max; i++)
+        ids[i] = i;
+    return i;
+}
+static int display_bounds(int id, SDL_Rect *r) {
+    return SDL_GetDisplayBounds(id, r);
+}
+static SDL_Window *create_window(const char *title, int other, const SDL_Rect *bounds, int w, int h,
+                                 Uint64 flags) {
+    int x = SDL_WINDOWPOS_UNDEFINED, y = x;
+    (void)bounds;
+    if (other >= 0) {
+        /* The compositor already shows a second output: ask for it by index. */
+        flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+        x = SDL_WINDOWPOS_UNDEFINED_DISPLAY(other);
+        y = x;
+    }
+    return SDL_CreateWindow(title, x, y, w, h, (Uint32)flags);
+}
+static int window_event(const SDL_Event *e, Uint32 *id, int *resized) {
+    if (e->type != SDL_WINDOWEVENT)
+        return 0;
+    *id = e->window.windowID;
+    *resized = e->window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
+               e->window.event == SDL_WINDOWEVENT_RESIZED;
+    return 1;
+}
+#endif
 
 static void debug(const char *format, ...) __attribute__((format(printf, 1, 2)));
 static void debug(const char *format, ...) {
@@ -110,6 +236,9 @@ static int detect(void) {
         return 1;
     }
     /* KMSDRM presents one window; the others route windows by title or by output. */
+    /* The SDL3 shim names itself "sdl2" and the SDL2 driver it sits on in SDL3SHIM_SDL2_VIDEODRIVER. */
+    if (driver && !strcmp(driver, "sdl2") && env_equals("SDL3SHIM_SDL2_VIDEODRIVER", "wayland", "x11"))
+        driver = "wayland";
     if (!driver || (strcmp(driver, "wayland") && strcmp(driver, "x11")))
         return 0;
     {
@@ -127,7 +256,7 @@ static uint32_t interval_ms(void) {
 }
 static void *screen_proc(const char *name, void *user) {
     (void)user;
-    return SDL_GL_GetProcAddress(name);
+    return (void *)SDL_GL_GetProcAddress(name);
 }
 static int render_thread(void *unused) {
     typedef void (*fn_viewport)(int, int, int, int);
@@ -141,7 +270,7 @@ static int render_thread(void *unused) {
     spo_gl *gl = NULL;
     int first = 1;
     (void)unused;
-    if (SDL_GL_MakeCurrent(screen.window, screen.context) != 0) {
+    if (make_current(screen.window, screen.context) != 0) {
         screen.gl_failed = 1;
         return 0;
     }
@@ -203,7 +332,7 @@ static int render_thread(void *unused) {
         SDL_GL_SwapWindow(screen.window);
     }
     spo_gl_destroy(gl, 0);
-    SDL_GL_MakeCurrent(NULL, NULL);
+    make_current(NULL, NULL);
     return 0;
 }
 
@@ -436,11 +565,11 @@ static int open_window(void) {
                                      SDL_GL_MULTISAMPLEBUFFERS,
                                      SDL_GL_MULTISAMPLESAMPLES,
                                      SDL_GL_SHARE_WITH_CURRENT_CONTEXT};
-    int saved[sizeof(attributes) / sizeof(attributes[0])], i, display, other = -1, count;
+    int saved[sizeof(attributes) / sizeof(attributes[0])], i, display, other = -1, count, ids[8];
     SDL_Rect bounds = {0, 0, 0, 0};
-    Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS;
+    Uint64 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS;
     const char *title = getenv("SPO_SCREEN_TITLE");
-    int width, height, x = SDL_WINDOWPOS_UNDEFINED, y = SDL_WINDOWPOS_UNDEFINED;
+    int width, height;
     Uint32 started = SDL_GetTicks();
     screen.game_window = SDL_GL_GetCurrentWindow();
     screen.game_context = SDL_GL_GetCurrentContext();
@@ -449,7 +578,7 @@ static int open_window(void) {
         return 0;
     }
     for (i = 0; i < (int)(sizeof(attributes) / sizeof(attributes[0])); i++)
-        if (SDL_GL_GetAttribute((SDL_GLattr)attributes[i], &saved[i]) != 0)
+        if (get_attribute((SDL_GLattr)attributes[i], &saved[i]) != 0)
             saved[i] = 0;
     /* The game's context decides the API; the screen needs no depth or multisampling. */
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
@@ -457,30 +586,26 @@ static int open_window(void) {
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
     SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
-    SDL_SetHint("SDL_WINDOW_NO_ACTIVATION_WHEN_SHOWN", "1");
+    SDL_SetHint(SPO_HINT_NO_ACTIVATION);
     SDL_SetHint("SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS", "0");
-    display = SDL_GetWindowDisplayIndex(screen.game_window);
-    count = SDL_GetNumVideoDisplays();
+    display = window_display(screen.game_window);
+    count = display_ids(ids, 8);
     for (i = 0; i < count; i++)
-        if (i != display && !SDL_GetDisplayBounds(i, &bounds)) {
-            other = i;
+        if (ids[i] != display && !display_bounds(ids[i], &bounds)) {
+            other = ids[i];
             break;
         }
     SDL_GetWindowSize(screen.game_window, &width, &height);
     if (other >= 0) {
-        /* The compositor already shows a second output: ask for it by index. */
-        flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
-        x = SDL_WINDOWPOS_UNDEFINED_DISPLAY(other);
-        y = x;
         width = bounds.w;
         height = bounds.h;
     }
     watchdog_start();
-    screen.window = SDL_CreateWindow(title && *title ? title : "Secondary", x, y, width, height,
-                                     flags | SDL_WINDOW_HIDDEN);
+    screen.window = create_window(title && *title ? title : "Secondary", other, &bounds, width, height,
+                                  flags | SDL_WINDOW_HIDDEN);
     if (screen.window)
         screen.context = SDL_GL_CreateContext(screen.window);
-    SDL_GL_MakeCurrent(screen.game_window, screen.game_context);
+    make_current(screen.game_window, screen.game_context);
     for (i = 0; i < (int)(sizeof(attributes) / sizeof(attributes[0])); i++)
         SDL_GL_SetAttribute((SDL_GLattr)attributes[i], saved[i]);
     if (!screen.window || !screen.context)
@@ -515,12 +640,11 @@ failed:
    use until it is seen on another output, and is dropped when that does not happen. */
 static void poll_state(void) {
     if (screen.state == SCREEN_OPENING) {
-        int mine = SDL_GetWindowDisplayIndex(screen.window),
-            game = SDL_GetWindowDisplayIndex(screen.game_window);
+        int mine = window_display(screen.window), game = window_display(screen.game_window);
         if (mine >= 0 && game >= 0 && mine != game) {
             screen.state = SCREEN_LIVE;
             debug("live on display %d (game %d) after %u ms, %ux%u", mine, game,
-                  SDL_GetTicks() - screen.opened_at, screen.width, screen.height);
+                  (unsigned)(SDL_GetTicks() - screen.opened_at), screen.width, screen.height);
         } else if (SDL_GetTicks() - screen.opened_at > SCREEN_VALIDATE_MS) {
             debug("not on another display (%d, game %d); closing", mine, game);
             fail();
@@ -691,45 +815,45 @@ static uint32_t finger_slot(SDL_FingerID id, int create) {
     return SCREEN_FINGERS;
 }
 static void debug_event(const SDL_Event *event) {
-    if (event->type == SDL_FINGERDOWN && finger_windows()) {
+    if (event->type == SPO_FINGER_DOWN && finger_windows()) {
         const finger_event *f = (const finger_event *)event;
         debug("finger down window %u (screen %u) touch %lld at %.2f %.2f", f->windowID,
-              screen.window_id, (long long)f->touchId, (double)f->x, (double)f->y);
+              screen.window_id, (long long)TOUCH_ID(f), (double)f->x, (double)f->y);
     }
 }
 /* Events of the screen's own window. Returns 1 when the event was one of its own, and sets
  *consumed when the overlay keeps it from the game. */
 static int screen_event(const SDL_Event *event, int32_t *consumed) {
     Uint32 id = 0;
+    int resized = 0, is_window;
     if (screen.state != SCREEN_LIVE && screen.state != SCREEN_OPENING)
         return 0;
-    switch (event->type) {
-    case SDL_WINDOWEVENT:
-        id = event->window.windowID;
-        break;
-    case SDL_MOUSEBUTTONDOWN:
-    case SDL_MOUSEBUTTONUP:
-        id = event->button.windowID;
-        break;
-    case SDL_MOUSEMOTION:
-        id = event->motion.windowID;
-        break;
-    case SDL_FINGERDOWN:
-    case SDL_FINGERUP:
-    case SDL_FINGERMOTION:
-        if (!finger_windows())
+    is_window = window_event(event, &id, &resized);
+    if (!is_window) {
+        switch (event->type) {
+        case SPO_MOUSE_DOWN:
+        case SPO_MOUSE_UP:
+            id = event->button.windowID;
+            break;
+        case SPO_MOUSE_MOTION:
+            id = event->motion.windowID;
+            break;
+        case SPO_FINGER_DOWN:
+        case SPO_FINGER_UP:
+        case SPO_FINGER_MOTION:
+            if (!finger_windows())
+                return 0;
+            id = ((const finger_event *)event)->windowID;
+            break;
+        default:
             return 0;
-        id = ((const finger_event *)event)->windowID;
-        break;
-    default:
-        return 0;
+        }
     }
     if (!id || id != screen.window_id)
         return 0;
     *consumed = 0;
-    if (event->type == SDL_WINDOWEVENT) {
-        if (event->window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
-            event->window.event == SDL_WINDOWEVENT_RESIZED) {
+    if (is_window) {
+        if (resized) {
             int w, h;
             SDL_GL_GetDrawableSize(screen.window, &w, &h);
             SDL_LockMutex(screen.lock);
@@ -744,12 +868,12 @@ static int screen_event(const SDL_Event *event, int32_t *consumed) {
     }
     if (screen.state != SCREEN_LIVE)
         return 1;
-    if (event->type == SDL_FINGERDOWN || event->type == SDL_FINGERUP ||
-        event->type == SDL_FINGERMOTION) {
+    if (event->type == SPO_FINGER_DOWN || event->type == SPO_FINGER_UP ||
+        event->type == SPO_FINGER_MOTION) {
         const finger_event *f = (const finger_event *)event;
-        uint32_t slot = finger_slot(f->fingerId, event->type == SDL_FINGERDOWN);
-        uint32_t phase = event->type == SDL_FINGERDOWN ? SPO_TOUCH_DOWN
-                         : event->type == SDL_FINGERUP ? SPO_TOUCH_UP
+        uint32_t slot = finger_slot(FINGER_ID(f), event->type == SPO_FINGER_DOWN);
+        uint32_t phase = event->type == SPO_FINGER_DOWN ? SPO_TOUCH_DOWN
+                         : event->type == SPO_FINGER_UP ? SPO_TOUCH_UP
                                                        : SPO_TOUCH_MOVE;
         if (slot < SCREEN_FINGERS) {
             touch(slot, phase, f->x, f->y);
@@ -760,12 +884,12 @@ static int screen_event(const SDL_Event *event, int32_t *consumed) {
         return 1;
     }
     /* A touch panel's pointer repeats the finger events above. */
-    if ((event->type == SDL_MOUSEMOTION ? event->motion.which : event->button.which) ==
+    if ((event->type == SPO_MOUSE_MOTION ? event->motion.which : event->button.which) ==
         SDL_TOUCH_MOUSEID)
         return 1;
     if (screen.logical_w > 0 && screen.logical_h > 0) {
         float x, y;
-        if (event->type == SDL_MOUSEMOTION) {
+        if (event->type == SPO_MOUSE_MOTION) {
             if (!screen.mouse_down)
                 return 1;
             x = (float)event->motion.x / (float)screen.logical_w;
@@ -774,7 +898,7 @@ static int screen_event(const SDL_Event *event, int32_t *consumed) {
         } else if (event->button.button == SDL_BUTTON_LEFT) {
             x = (float)event->button.x / (float)screen.logical_w;
             y = (float)event->button.y / (float)screen.logical_h;
-            screen.mouse_down = event->type == SDL_MOUSEBUTTONDOWN;
+            screen.mouse_down = event->type == SPO_MOUSE_DOWN;
             touch(0, screen.mouse_down ? SPO_TOUCH_DOWN : SPO_TOUCH_UP, x, y);
         }
     }

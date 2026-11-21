@@ -101,6 +101,11 @@ compiles for `spo_handle_sdl_event`, and an SDL window with a GL context on the
 thread that calls `spo_init`. A port needs no change for the overlay; a new pin
 and rebuild is enough.
 
+- SDL3 hosts: `src/sdl3.c` has the screen and nothing else. CMake compiles it into
+  `spo::static` when `SPO_BUILD_SDL3` is on, which is the default when `SDL3::SDL3` is
+  already a target. Pass every event to `spo_handle_sdl3_screen_event` and keep mapping
+  controller events to `spo_handle_input`, `spo_handle_axis` and `spo_input_sync`. Under the
+  SDL3 shim (video driver `sdl2`), detection reads `SDL3SHIM_SDL2_VIDEODRIVER`.
 - Detection: two connected internal panels in `/sys/class/drm` (DSI, eDP, LVDS
   or DPI connectors, so an HDMI display does not count), or
   `DEVICE_HAS_DUAL_SCREEN` set to `Y`, `true` or `1`, under the Wayland or X11 SDL

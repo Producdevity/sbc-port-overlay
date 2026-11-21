@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 #define SPO_ABI_VERSION 1u
-#define SPO_VERSION "0.2.0"
+#define SPO_VERSION "0.2.1"
 #define SPO_ALL_CONTROLLERS UINT32_MAX
 #define SPO_INIT_NO_RENDER 1u
 #define SPO_INIT_NO_SAMPLER_THREAD 2u
@@ -182,6 +182,10 @@ SPO_API spo_result spo_target_fps_set(uint32_t);
 SPO_API spo_result spo_notice(const char *);
 union SDL_Event;
 SPO_API int32_t spo_handle_sdl_event(const union SDL_Event *);
+/* SDL3 hosts: src/sdl3.c has the second screen only. Pass it every event; the result is nonzero
+   when the overlay keeps the event from the game. Controller events go to spo_handle_input,
+   spo_handle_axis and spo_input_sync as for any host without src/sdl2.c. */
+SPO_API int32_t spo_handle_sdl3_screen_event(const union SDL_Event *);
 /* Second screen, provided by the SDL adapter (src/sdl2.c). The overlay opens it by itself on a
    device with two display panels and draws there instead of over the game; these calls are for a
    port that wants to draw its own content on it. */
