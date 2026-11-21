@@ -29,7 +29,7 @@ Settings menu and performance overlay for Linux ports on ARM handhelds
 - Each frame is a single draw call, with no allocations. Stats are read once a
   second on a background thread.
 
-<p align="center"><img src="docs/images/overlay-second-screen.png" alt="Game on the top screen and the overlay on the lower screen of an RG DS" width="320"></p>
+<p align="center"><img src="docs/images/overlay-second-screen.png" alt="Nookery on the top screen of an RG DS and the overlay on the lower screen" width="320"></p>
 
 ## Usage
 
