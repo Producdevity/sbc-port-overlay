@@ -125,8 +125,8 @@ and rebuild is enough.
 - The menu keeps its pad input. If the second screen is touched, a tap acts on
   the tab or row under it, a drag over the rows scrolls and a tap outside the
   panel closes the menu. The Overlay tab has a Screen row (Second or Game); it
-  is saved as `screen=0|1` in `[spo]` and only shows on a device with a second
-  screen.
+  is saved as `screen=0` (Second) or `screen=1` (Game) in `[spo]` and only shows
+  on a device with a second screen.
 
 A port can draw its own content there:
 
@@ -185,6 +185,74 @@ port creates the directory.
 
 `font_scale` picks the font: 1 is 6x12, 2 is 8x16 (the default), 3 is 12x24 and
 4 is 16x32. If the overlay does not fit the screen it uses the next smaller one.
+
+## Preload shim
+
+`libspo_preload.so` (`-DSPO_BUILD_PRELOAD=ON`) adds the overlay to an SDL2
+OpenGL or GLES application that does not link the library:
+
+```sh
+SPO_CONFIG=conf/overlay.ini SPO_PORT_NAME="My Port" \
+LD_PRELOAD=./libspo_preload.so ./my_port
+```
+
+It hooks `SDL_GL_SwapWindow`, `SDL_PollEvent`, `SDL_WaitEvent` and
+`SDL_WaitEventTimeout`. The first swap with a context current initialises the
+overlay on that window; every later swap on that window and thread draws it into
+the default framebuffer before the real swap. Events the overlay consumes never
+reach the application. While the menu is open, `SDL_GameControllerGetButton`,
+`SDL_GameControllerGetAxis` and `SDL_GetKeyboardState` report nothing, for
+applications that read state instead of events. An application that reads events
+with `SDL_PeepEvents` is not covered.
+
+| Variable | Use |
+| --- | --- |
+| `SPO_CONFIG` | Config file path. Unset keeps settings in memory. |
+| `SPO_SETTINGS` | Settings file, below. |
+| `SPO_PORT_NAME`, `SPO_PORT_VERSION` | Shown on the About tab. |
+
+## Settings file
+
+A launcher-only port declares its own tabs and options in an ini file named by
+`SPO_SETTINGS`. Each `[page key]` is a tab and each `[option page.key]` is a row,
+registered through `spo_register_page` and `spo_register_option`, so the limits
+above apply.
+
+```ini
+[page graphics]
+label = Graphics
+
+[option graphics.vsync]
+type = toggle
+label = Vsync
+default = 1
+
+[option graphics.msaa]
+type = choice
+label = Anti-aliasing
+help = Samples per pixel.
+choices = Off, 2x, 4x
+default = 0
+
+[option graphics.scale]
+type = integer
+label = Render scale
+min = 25
+max = 100
+step = 25
+default = 100
+```
+
+`type` is `toggle`, `choice` or `integer`. Values are saved in the config file
+under `[port.<page>]`; a choice is saved as its index. A change in the menu shows
+"Applies at the next start". Lines that cannot be used are reported on stderr
+and skipped.
+
+A launcher reads a saved value with one line; an empty result means the default:
+
+```sh
+msaa=$(awk -F= '/^\[/{s=$0} s=="[port.graphics]" && $1=="msaa"{print $2}' conf/overlay.ini)
+```
 
 ## Colours
 
