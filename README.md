@@ -6,8 +6,8 @@ Settings menu and performance overlay for Linux ports on ARM handhelds
 <p align="center"><img src="docs/images/overlay-galaxy.gif" alt="The overlay and its settings menu over gameplay on an RG40XX-H" width="640"></p>
 
 <p align="center">
-<img src="docs/images/overlay-menu.png" alt="The Show tab of the settings menu" width="320">
-<img src="docs/images/overlay-full.png" alt="The Full preset" width="320">
+<img src="docs/images/overlay-menu.png" alt="The Show tab of the settings menu on an RG DS" width="320">
+<img src="docs/images/overlay-full.png" alt="The Full preset over Animal Crossing on an RG DS" width="320">
 </p>
 
 - Tap Menu to open it. Menu+button firmware hotkeys keep working.
@@ -22,8 +22,14 @@ Settings menu and performance overlay for Linux ports on ARM handhelds
   colour change shows after it has held for a second.
 - Ports can add their own settings pages and counters. Settings are saved per
   port.
+- On a handheld with two screens the overlay and its menu go to the second
+  screen, and the Overlay tab can move them back over the game.
+- An optional preload shim adds the overlay to an SDL2 port that does not link
+  the library, and an ini file can declare that port's settings.
 - Each frame is a single draw call, with no allocations. Stats are read once a
   second on a background thread.
+
+<p align="center"><img src="docs/images/overlay-second-screen.png" alt="Game on the top screen and the overlay on the lower screen of an RG DS" width="320"></p>
 
 ## Usage
 
@@ -67,6 +73,10 @@ set(SPO_BUILD_SDL2 ON)
 add_subdirectory(third_party/sbc-port-overlay)
 target_link_libraries(my_port PRIVATE spo::static spo::sdl2)
 ```
+
+For an SDL2 port that does not link the library, build with
+`-DSPO_BUILD_PRELOAD=ON` and start it with `LD_PRELOAD=libspo_preload.so`; see
+[docs/api.md](docs/api.md#preload-shim).
 
 Tests: `cmake -S . -B build && cmake --build build && ctest --test-dir build`.
 

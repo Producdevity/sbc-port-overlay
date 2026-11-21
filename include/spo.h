@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 #define SPO_ABI_VERSION 1u
-#define SPO_VERSION "0.1.0"
+#define SPO_VERSION "0.2.0"
 #define SPO_ALL_CONTROLLERS UINT32_MAX
 #define SPO_INIT_NO_RENDER 1u
 #define SPO_INIT_NO_SAMPLER_THREAD 2u
