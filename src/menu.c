@@ -92,9 +92,13 @@ const char *spo_menu_tab_label(int tab) {
 static int screen_row(void) {
     return spo->sink && spo->sink->available();
 }
+/* The Overlay tab ends with the Screen row, when there is one, and the Face buttons row. */
+static int face_row(void) {
+    return screen_row() ? 7 : 6;
+}
 int spo_menu_rows(void) {
     if (spo->tab == 0)
-        return screen_row() ? 7 : 6;
+        return face_row() + 1;
     if (spo->tab == 1)
         return show_entries(-1, NULL);
     if (spo->tab - 2 < (int)spo->page_count)
@@ -111,19 +115,18 @@ void spo_menu_describe(int row, spo_menu_row *r) {
     r->enabled = 1;
     r->tone = SPO_TONE_ACCENT;
     if (spo->tab == 0) {
-        static const char *const names[] = {"Preset",
-                                            "Position",
-                                            "Size",
-                                            "Background opacity",
-                                            "Text opacity",
-                                            "Graph length",
-                                            "Screen"};
+        static const char *const names[] = {
+            "Preset",       "Position",     "Size",   "Background opacity",
+            "Text opacity", "Graph length", "Screen", "Face buttons"};
         const spo_overlay_settings *o = &spo->overlay;
-        if (row < 0 || row >= (screen_row() ? 7 : 6))
+        int face = row == face_row(), screen = !face && row == 6;
+        if (row < 0 || row > face_row())
             return;
-        snprintf(r->label, sizeof(r->label), "%s", names[row]);
-        r->kind = row < 2 || row == 6 ? SPO_ROW_CHOICE : SPO_ROW_SLIDER;
-        if (row == 6)
+        snprintf(r->label, sizeof(r->label), "%s", names[face ? 7 : row]);
+        r->kind = row < 2 || screen || face ? SPO_ROW_CHOICE : SPO_ROW_SLIDER;
+        if (face)
+            snprintf(r->value, sizeof(r->value), "%s", spo->face_swapped ? "Swapped" : "As set");
+        else if (screen)
             snprintf(r->value, sizeof(r->value), "%s", spo->screen_mode ? "Game" : "Second");
         else if (row == 0)
             snprintf(r->value, sizeof(r->value), "%s", o->custom ? "Custom" : preset_names[o->preset]);
@@ -185,6 +188,10 @@ void spo_menu_describe(int row, spo_menu_row *r) {
 }
 const char *spo_menu_help(int row) {
     spo_option *o;
+    if (spo->tab == 0)
+        return row == face_row()
+                   ? "Swapped exchanges A and B, X and Y in the game. The menu keeps its buttons."
+                   : "";
     if (spo->tab < 2 || spo->tab - 2 >= (int)spo->page_count)
         return "";
     o = spo_menu_option(row);
@@ -289,6 +296,8 @@ static void change(int dir, int activate) {
             o->background_opacity = clamp_step(o->background_opacity, dir, 5, 0, 100);
         else if (row == 4)
             o->text_opacity = clamp_step(o->text_opacity, dir, 5, 10, 100);
+        else if (row == face_row())
+            spo->face_swapped = !spo->face_swapped;
         else if (row == 6)
             spo->screen_mode = !spo->screen_mode;
         else

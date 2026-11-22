@@ -165,6 +165,15 @@ SPO_API void spo_input_reset(uint32_t);
 SPO_API spo_result spo_input_sync(uint32_t, uint32_t, const int32_t[SPO_AXIS_COUNT]);
 SPO_API int32_t spo_menu_is_open(void);
 SPO_API int32_t spo_input_captured(void);
+/* The "Face buttons" option of the Overlay tab. Swapped exchanges A with B and X with Y for this
+   process, for ports that expect SDL's positional layout (A at the bottom) on a system whose
+   controller mapping puts A on the right. The overlay's own menu does not use it. */
+SPO_API int32_t spo_face_buttons_swapped(void);
+/* Maps an SDL controller button number: 0 (A) and 1 (B) exchange, 2 (X) and 3 (Y) exchange, and
+   every other number, or any number while the option is off, comes back unchanged. The numbers
+   are the same for SDL_GameControllerButton and SDL_GamepadButton, and the mapping is its own
+   inverse. Any thread. */
+SPO_API uint32_t spo_face_button(uint32_t);
 SPO_API spo_result spo_frame(uint32_t, uint32_t);
 SPO_API void spo_reset_timing(void);
 SPO_API void spo_context_lost(void);
@@ -182,10 +191,15 @@ SPO_API spo_result spo_target_fps_set(uint32_t);
 SPO_API spo_result spo_notice(const char *);
 union SDL_Event;
 SPO_API int32_t spo_handle_sdl_event(const union SDL_Event *);
+/* Applies "Face buttons" to an SDL2 SDL_CONTROLLERBUTTONDOWN or UP event in place. Call it on
+   events spo_handle_sdl_event did not consume, after that call. Other events are left alone. */
+SPO_API void spo_map_sdl_event(union SDL_Event *);
 /* SDL3 hosts: src/sdl3.c has the second screen only. Pass it every event; the result is nonzero
    when the overlay keeps the event from the game. Controller events go to spo_handle_input,
    spo_handle_axis and spo_input_sync as for any host without src/sdl2.c. */
 SPO_API int32_t spo_handle_sdl3_screen_event(const union SDL_Event *);
+/* SDL3 counterpart of spo_map_sdl_event for SDL_EVENT_GAMEPAD_BUTTON_DOWN and UP. */
+SPO_API void spo_map_sdl3_event(union SDL_Event *);
 /* Second screen, provided by the SDL adapter (src/sdl2.c). The overlay opens it by itself on a
    device with two display panels and draws there instead of over the game; these calls are for a
    port that wants to draw its own content on it. */

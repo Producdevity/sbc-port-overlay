@@ -25,7 +25,10 @@ typedef Uint8 (*button_fn)(SDL_GameController *, SDL_GameControllerButton);
 typedef Sint16 (*axis_fn)(SDL_GameController *, SDL_GameControllerAxis);
 typedef const Uint8 *(*keys_fn)(int *);
 
+extern _Thread_local int spo_raw_buttons; /* src/sdl2.c */
+
 static SDL_Window *game_window;
+static _Thread_local int depth; /* hooked event calls in progress on this thread */
 static pthread_t game_thread;
 static int state; /* 0 not tried, 1 active, -1 failed */
 static void (*get_integerv)(unsigned, int *);
@@ -77,35 +80,51 @@ EXPORT void SDL_GL_SwapWindow(SDL_Window *window) {
     }
     fn(window);
 }
-/* A consumed event is dropped and the next one is read. */
+/* A consumed event is dropped and the next one is read. An SDL build may route SDL_PollEvent
+   through the exported SDL_WaitEventTimeout, which reaches the hook below; only the outermost call
+   applies "Face buttons", since the swap undoes itself when applied twice. */
 EXPORT int SDL_PollEvent(SDL_Event *event) {
     int r;
     NEXT(poll_fn, "SDL_PollEvent");
+    depth++;
     while ((r = fn(event)) && event && state == 1 && spo_handle_sdl_event(event))
         ;
+    depth--;
+    if (r && !depth && state == 1)
+        spo_map_sdl_event(event);
     return r;
 }
 EXPORT int SDL_WaitEventTimeout(SDL_Event *event, int timeout) {
     int r;
     Uint32 end = SDL_GetTicks() + (Uint32)timeout;
     NEXT(wait_fn, "SDL_WaitEventTimeout");
+    depth++;
     while ((r = fn(event, timeout)) && event && state == 1 && spo_handle_sdl_event(event)) {
         if (timeout < 0)
             continue;
-        if ((Sint32)(end - SDL_GetTicks()) <= 0)
-            return 0;
+        if ((Sint32)(end - SDL_GetTicks()) <= 0) {
+            r = 0;
+            break;
+        }
         timeout = (int)(end - SDL_GetTicks());
     }
+    depth--;
+    if (r && !depth && state == 1)
+        spo_map_sdl_event(event);
     return r;
 }
 EXPORT int SDL_WaitEvent(SDL_Event *event) {
     return SDL_WaitEventTimeout(event, -1);
 }
 /* The menu owns the controller while it is open; applications that read state instead of
-   events must not see it. */
+   events must not see it. The overlay's own reads (spo_raw_buttons) stay raw. */
 EXPORT Uint8 SDL_GameControllerGetButton(SDL_GameController *c, SDL_GameControllerButton b) {
     NEXT(button_fn, "SDL_GameControllerGetButton");
-    return state == 1 && spo_input_captured() ? 0 : fn(c, b);
+    if (state != 1)
+        return fn(c, b);
+    if (spo_input_captured())
+        return 0;
+    return fn(c, spo_raw_buttons ? b : (SDL_GameControllerButton)spo_face_button((uint32_t)b));
 }
 EXPORT Sint16 SDL_GameControllerGetAxis(SDL_GameController *c, SDL_GameControllerAxis a) {
     NEXT(axis_fn, "SDL_GameControllerGetAxis");

@@ -2,6 +2,7 @@
 #include "internal.h"
 #include "mali.h"
 #include <assert.h>
+#include <fcntl.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -541,6 +542,73 @@ static void persistence(void) {
     spo_preset_set(4);
     assert(spo_config_save() == SPO_IO && spo_config_dirty());
 }
+static void face_buttons(void) {
+    char path[] = "/tmp/spo-face-XXXXXX";
+    int fd = mkstemp(path);
+    spo_config c = config(path);
+    spo_menu_row row;
+    uint32_t b;
+    assert(fd >= 0);
+    close(fd);
+    spo_shutdown();
+    assert(spo_init(&c) == SPO_OK);
+    /* Default: nothing changes, for every button number. */
+    assert(!spo_face_buttons_swapped());
+    for (b = 0; b < 40; b++)
+        assert(spo_face_button(b) == b);
+    /* The row is the last one on the Overlay tab and takes effect at once. */
+    assert(spo_menu_rows() == 7);
+    spo_set_open(1);
+    spo->cursor = 6;
+    spo_menu_describe(6, &row);
+    assert(!strcmp(row.label, "Face buttons") && !strcmp(row.value, "As set") &&
+           row.kind == SPO_ROW_CHOICE && row.enabled);
+    assert(!strcmp(spo_menu_help(6),
+                   "Swapped exchanges A and B, X and Y in the game. The menu keeps its buttons."));
+    assert(!*spo_menu_help(5));
+    spo_menu_button(SPO_RIGHT);
+    spo_menu_describe(6, &row);
+    assert(!strcmp(row.value, "Swapped") && spo_face_buttons_swapped() && spo->dirty);
+    assert(spo_face_button(0) == 1 && spo_face_button(1) == 0);
+    assert(spo_face_button(2) == 3 && spo_face_button(3) == 2);
+    for (b = 4; b < 40; b++)
+        assert(spo_face_button(b) == b);
+    for (b = 0; b < 8; b++)
+        assert(spo_face_button(spo_face_button(b)) == b);
+    /* The menu keeps working on the buttons as the system reports them. */
+    spo_menu_button(SPO_LEFT);
+    assert(!spo_face_buttons_swapped());
+    spo_menu_button(SPO_SOUTH);
+    assert(spo_face_buttons_swapped());
+    spo_menu_button(SPO_EAST);
+    assert(!spo_menu_is_open());
+    /* Saved in the port's settings file and read back at the next start. */
+    assert(spo_config_save() == SPO_OK);
+    spo_shutdown();
+    assert(spo_init(&c) == SPO_OK);
+    assert(spo_face_buttons_swapped() && spo_face_button(1) == 0);
+    spo_shutdown();
+    {
+        FILE *f = fopen(path, "r");
+        char buf[4096];
+        size_t n;
+        assert(f);
+        n = fread(buf, 1, sizeof(buf) - 1, f);
+        buf[n] = 0;
+        fclose(f);
+        assert(strstr(buf, "face_buttons=1"));
+    }
+    /* Not set in a fresh file; a bad value is reported and ignored. */
+    fd = open(path, O_WRONLY | O_TRUNC);
+    assert(fd >= 0 && write(fd, "[spo]\nface_buttons=2\n", 21) == 21);
+    close(fd);
+    assert(spo_init(&c) == SPO_OK);
+    assert(!spo_face_buttons_swapped() && spo_last_error() == SPO_INVALID);
+    spo_shutdown();
+    assert(!spo_face_buttons_swapped() && spo_face_button(0) == 0);
+    unlink(path);
+    assert(spo_init(&c) == SPO_OK);
+}
 static void actions(void) {
     spo_id page, id;
     uint32_t count;
@@ -969,12 +1037,12 @@ static void second_screen(void) {
     spo_shutdown();
     assert(spo_init(&c) == SPO_OK);
     /* No sink: one tab row fewer, nothing routed. */
-    assert(spo_menu_rows() == 6);
+    assert(spo_menu_rows() == 7);
     memset(&fake, 0, sizeof(fake));
     spo_sink_set(&fake_sink);
-    assert(spo_menu_rows() == 6);
-    fake.available = 1;
     assert(spo_menu_rows() == 7);
+    fake.available = 1;
+    assert(spo_menu_rows() == 8);
     /* The HUD is laid out for the second screen and handed over, not drawn here. */
     fake.live = 1;
     fake.width = 640;
@@ -1082,6 +1150,7 @@ int main(void) {
     gpu_counters();
     fixtures();
     persistence();
+    face_buttons();
     actions();
     timing();
     graph_cache();

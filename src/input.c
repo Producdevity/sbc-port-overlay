@@ -36,6 +36,12 @@ static int all_neutral(void) {
 int32_t spo_menu_is_open(void) {
     return spo ? spo->open : 0;
 }
+int32_t spo_face_buttons_swapped(void) {
+    return spo ? spo->face_swapped : 0;
+}
+uint32_t spo_face_button(uint32_t button) {
+    return spo && spo->face_swapped && button < 4 ? button ^ 1u : button;
+}
 int32_t spo_input_captured(void) {
     return spo ? (spo->open || spo->drain) : 0;
 }

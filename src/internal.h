@@ -156,7 +156,7 @@ typedef struct {
     uint32_t stats_frames, frame_reads;
     void *renderer;
     const spo_sink *sink;
-    int screen_mode, routed;
+    int screen_mode, routed, face_swapped;
     spo_hit hit;
     int touch_down, touch_drag, touch_x, touch_y, touch_scroll;
 } spo_context;

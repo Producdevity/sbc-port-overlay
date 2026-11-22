@@ -7,6 +7,9 @@ static const spo_button buttons[] = {
     SPO_L3,    SPO_R3,   SPO_L1,      SPO_R1,      SPO_UP,      SPO_DOWN,    SPO_LEFT,
     SPO_RIGHT, SPO_MISC, SPO_PADDLE1, SPO_PADDLE2, SPO_PADDLE3, SPO_PADDLE4, SPO_TOUCHPAD};
 static const spo_axis axes[] = {SPO_LX, SPO_LY, SPO_RX, SPO_RY, SPO_LT, SPO_RT};
+/* Set while the overlay reads button state itself, so a preload shim's hooked
+   SDL_GameControllerGetButton reports the raw buttons the menu works with. */
+_Thread_local int spo_raw_buttons;
 static void sync_controller(SDL_JoystickID id) {
     SDL_GameController *controller = SDL_GameControllerFromInstanceID(id);
     SDL_version version;
@@ -20,14 +23,20 @@ static void sync_controller(SDL_JoystickID id) {
     count = SDL_VERSIONNUM(version.major, version.minor, version.patch) >= SDL_VERSIONNUM(2, 0, 14)
                 ? 21
                 : 15;
+    spo_raw_buttons = 1;
     for (i = 0; i < count; i++)
         if (SDL_GameControllerGetButton(controller, (SDL_GameControllerButton)i))
             held |= 1u << buttons[i];
+    spo_raw_buttons = 0;
     for (i = 0; i < SPO_AXIS_COUNT; i++)
         values[axes[i]] = SDL_GameControllerGetAxis(controller, (SDL_GameControllerAxis)i);
     spo_input_sync((uint32_t)id, held, values);
 }
 #include "screen.c"
+void spo_map_sdl_event(union SDL_Event *event) {
+    if (event && (event->type == SDL_CONTROLLERBUTTONDOWN || event->type == SDL_CONTROLLERBUTTONUP))
+        event->cbutton.button = (Uint8)spo_face_button(event->cbutton.button);
+}
 int32_t spo_handle_sdl_event(const union SDL_Event *event) {
     int32_t consumed;
     if (!event)

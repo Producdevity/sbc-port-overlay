@@ -22,6 +22,9 @@ Settings menu and performance overlay for Linux ports on ARM handhelds
   colour change shows after it has held for a second.
 - Ports can add their own settings pages and counters. Settings are saved per
   port.
+- A per-port Face buttons option swaps A with B and X with Y for ports that
+  expect SDL's positional layout on firmware that maps A to the east button. It
+  changes nothing outside the port's own process.
 - On a handheld with two screens the overlay and its menu go to the second
   screen, and the Overlay tab can move them back over the game.
 - An optional preload shim adds the overlay to an SDL2 port that does not link

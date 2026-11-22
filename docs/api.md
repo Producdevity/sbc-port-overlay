@@ -55,6 +55,44 @@ Up to 8 of each.
 
 Without SDL, use `spo_handle_input`, `spo_handle_axis` and `spo_input_sync`.
 
+## Face buttons
+
+Some firmware builds the SDL controller mapping from the frontend's layout
+setting. On ROCKNIX the default is Nintendo, which puts SDL's A on the right
+(east) button. A port written for SDL's positional layout (A at the bottom) then
+gets A and B, and X and Y, swapped.
+
+The last row of the Overlay tab, "Face buttons", fixes that for one port.
+**As set** (the default) changes nothing. **Swapped** exchanges A with B and X with
+Y. It takes effect at once, is saved as `face_buttons` in the `[spo]` section of
+the port's config file, and applies to the port's own process only. No system
+setting is read or written.
+
+The menu reads the buttons as SDL reports them in both modes, so it follows the
+system's layout and the option never changes how the menu is operated. In the
+Nintendo layout the button that toggles a row is the east one.
+
+- **Preload shim:** nothing to do. The shim swaps `SDL_CONTROLLERBUTTONDOWN` and
+  `SDL_CONTROLLERBUTTONUP` events returned by `SDL_PollEvent`, `SDL_WaitEvent`
+  and `SDL_WaitEventTimeout`, in place and without queueing, and the result of
+  `SDL_GameControllerGetButton`.
+- **SDL2 port that links the library:** `spo_handle_sdl_event` takes a const
+  event. After it returns 0, call `spo_map_sdl_event(&event)` before the game
+  reads the event, and pass the button to `spo_face_button` before
+  `SDL_GameControllerGetButton`.
+- **SDL3 host:** `spo_map_sdl3_event(&event)` does the same for
+  `SDL_EVENT_GAMEPAD_BUTTON_DOWN` and `UP`. A host that maps its own controller
+  events, as Starlet does, calls `spo_face_button(sdl_button)` on the button
+  number before its own mapping, or checks `spo_face_buttons_swapped()`.
+  `spo_face_button` also covers `SDL_GetGamepadButton`.
+
+`spo_face_button(n)` exchanges 0 and 1 and exchanges 2 and 3 while the option is
+Swapped, and returns every other number, or any number with the option off,
+unchanged. It reads one word and may be called from any thread.
+
+Raw joystick reads (`SDL_JoystickGetButton`, `SDL_JOYBUTTONDOWN` and
+`SDL_JOYBUTTONUP` events) are not changed.
+
 ## Sampling
 
 On Linux, a nice-19 thread reads `/proc` and `/sys` once a second. The render
@@ -167,6 +205,7 @@ graph_samples=120
 fps_low=30
 fps_high=60
 screen=0
+face_buttons=0
 
 [spo.items]
 fps=1
@@ -208,7 +247,7 @@ the default framebuffer before the real swap. Events the overlay consumes never
 reach the application. While the menu is open, `SDL_GameControllerGetButton`,
 `SDL_GameControllerGetAxis` and `SDL_GetKeyboardState` report nothing, for
 applications that read state instead of events. An application that reads events
-with `SDL_PeepEvents` is not covered.
+with `SDL_PeepEvents` is not covered, including by [Face buttons](#face-buttons).
 
 | Variable | Use |
 | --- | --- |
