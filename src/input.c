@@ -112,6 +112,7 @@ spo_result spo_input_sync(uint32_t id, uint32_t buttons, const int32_t axes[SPO_
         spo->drain = 0;
     return SPO_OK;
 }
+#define SPO_GUIDE_TAP_NS UINT64_C(500000000)
 int32_t spo_handle_input(uint32_t id, spo_button button, uint32_t pressed) {
     spo_pad *p;
     uint32_t bit;
@@ -134,6 +135,7 @@ int32_t spo_handle_input(uint32_t id, spo_button button, uint32_t pressed) {
         if (button == SPO_GUIDE) {
             p->armed = p->ready && !p->held && !spo->drain;
             p->guide = 1;
+            p->guide_at = spo_now();
             memcpy(p->guide_axis, p->axis, sizeof(p->axis));
         } else if (p->guide)
             p->armed = 0;
@@ -148,7 +150,8 @@ int32_t spo_handle_input(uint32_t id, spo_button button, uint32_t pressed) {
     } else {
         p->held &= ~bit;
         if (button == SPO_GUIDE) {
-            int click = p->guide && p->armed;
+            /* Menu+volume and other hotkeys outside the pad only show up as a long hold. */
+            int click = p->guide && p->armed && spo_now() - p->guide_at < SPO_GUIDE_TAP_NS;
             p->guide = p->armed = 0;
             if (click) {
                 spo_set_open(!spo->open);

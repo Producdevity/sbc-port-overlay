@@ -39,9 +39,10 @@ Up to 8 of each.
 
 ## Input
 
-- Guide pressed and released alone opens the menu. Pressing another button or
-  moving a stick while Guide is held passes it through to the firmware. A stick
-  that rests off centre does not block the menu.
+- Guide pressed and released alone within 0.5 s opens the menu. Pressing another
+  button or moving a stick while Guide is held passes it through to the
+  firmware, and so does a longer hold, which covers Menu+volume hotkeys the
+  overlay cannot see. A stick that rests off centre does not block the menu.
 - In the menu: up and down move, left and right change a value, South toggles
   or runs the row, East and Guide close the menu. L1 and R1 switch tabs and
   wrap around.

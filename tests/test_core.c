@@ -70,6 +70,12 @@ static void input(void) {
     assert(!spo_menu_is_open());
     spo_handle_input(1, SPO_GUIDE, 0);
     assert(!spo_menu_is_open());
+    spo_handle_input(1, SPO_GUIDE, 1);
+    for (int i = 0; i < 4; i++)
+        if (spo->pads[i].used && spo->pads[i].id == 1)
+            spo->pads[i].guide_at -= UINT64_C(600000000);
+    spo_handle_input(1, SPO_GUIDE, 0);
+    assert(!spo_menu_is_open());
     pause_calls = 0;
     assert(!spo_handle_input(1, SPO_GUIDE, 1));
     assert(!spo_handle_input(1, SPO_GUIDE, 1));

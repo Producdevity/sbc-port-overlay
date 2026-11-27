@@ -68,7 +68,7 @@ typedef struct {
 typedef struct {
     uint32_t id, used, held, armed, guide, ready;
     int32_t axis[SPO_AXIS_COUNT], guide_axis[SPO_AXIS_COUNT];
-    uint64_t repeat_at;
+    uint64_t repeat_at, guide_at;
     spo_button repeat_button;
 } spo_pad;
 typedef struct {
