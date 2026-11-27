@@ -155,6 +155,17 @@ spo_result spo_metrics_init(void) {
     if (!error) {
         sample->thread_started = 1;
         error = pthread_create(&sample->thread, &attributes, run, sample);
+        // glibc counts static TLS against the stack size and rejects stacks that cannot hold it.
+        if (error == EINVAL) {
+            size_t fallback = 0;
+            pthread_attr_t defaults;
+            if (!pthread_attr_init(&defaults)) {
+                pthread_attr_getstacksize(&defaults, &fallback);
+                pthread_attr_destroy(&defaults);
+            }
+            if (fallback > stack && !pthread_attr_setstacksize(&attributes, fallback))
+                error = pthread_create(&sample->thread, &attributes, run, sample);
+        }
         if (error)
             sample->thread_started = 0;
     }
