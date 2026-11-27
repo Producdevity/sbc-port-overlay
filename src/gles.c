@@ -739,12 +739,16 @@ spo_result spo_backend_init(void) {
     spo_gl *g =
         spo_gl_create(spo->config.get_proc_address, spo->config.gl_user, spo->overlay.font_scale);
     if (!g)
-        return SPO_GL_UNAVAILABLE;
+        return spo_gl1_backend_init();
     spo->renderer = g;
     spo_text_copy(spo->renderer_name, sizeof(spo->renderer_name), spo_gl_renderer(g));
     return SPO_OK;
 }
 void spo_backend_shutdown(void) {
+    if (spo->renderer_gles1) {
+        spo_gl1_backend_shutdown();
+        return;
+    }
     spo_gl_destroy(spo->renderer, spo->lost);
     spo->renderer = NULL;
 }
@@ -752,5 +756,7 @@ spo_result spo_backend_draw(const spo_mesh *mesh, uint32_t width, uint32_t heigh
                             uint32_t *draws) {
     if (!spo->renderer)
         return SPO_GL_UNAVAILABLE;
+    if (spo->renderer_gles1)
+        return spo_gl1_backend_draw(mesh, width, height, draws);
     return spo_gl_draw(spo->renderer, mesh, width, height, draws);
 }

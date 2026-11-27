@@ -157,6 +157,7 @@ typedef struct {
     double cpu_sum, wall_sum, cpu_max;
     uint32_t stats_frames, frame_reads;
     void *renderer;
+    int renderer_gles1;
     const spo_sink *sink;
     int screen_mode, routed, face_swapped;
     spo_hit hit;
@@ -241,6 +242,9 @@ SPO_API int32_t spo_ui_pointer(uint32_t, int32_t, int32_t);
 spo_result spo_backend_init(void);
 void spo_backend_shutdown(void);
 spo_result spo_backend_draw(const spo_mesh *, uint32_t, uint32_t, uint32_t *);
+spo_result spo_gl1_backend_init(void);
+void spo_gl1_backend_shutdown(void);
+spo_result spo_gl1_backend_draw(const spo_mesh *, uint32_t, uint32_t, uint32_t *);
 #define SPO_HOLD_NS UINT64_C(1000000000)
 void spo_history_push(uint64_t);
 void spo_colours_step(uint64_t);
