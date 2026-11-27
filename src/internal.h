@@ -99,7 +99,9 @@ typedef struct {
 } spo_hit;
 typedef struct {
     spo_config config;
-    char path[4096], name[81], version[81], renderer_name[32];
+    char path[4096], name[81], version[81], author[41], renderer_name[32];
+    uint64_t signature_from;
+    int signature_drawn;
     spo_overlay_settings overlay;
     spo_page pages[8];
     spo_option options[64];
@@ -208,6 +210,7 @@ int spo_parse_mem(const char *, double *);
 int spo_parse_number(const char *, double *);
 int spo_parse_gpu_load(const char *, double *);
 spo_result spo_layout(uint32_t, uint32_t);
+int spo_signature_active(uint64_t now);
 spo_rect spo_anchor(uint32_t, uint32_t, int, int, int);
 const spo_font_info *spo_font_get(uint32_t);
 void spo_font_band(uint32_t, uint32_t, uint32_t, uint8_t *);

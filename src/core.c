@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "internal.h"
 #include <ctype.h>
+#include <stddef.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -113,7 +114,8 @@ spo_result spo_init(const spo_config *c) {
     spo_result result;
     if (spo)
         return SPO_ALREADY_INITIALIZED;
-    if (!c || c->struct_size != sizeof(*c) || c->abi_version != SPO_ABI_VERSION)
+    if (!c || (c->struct_size != sizeof(*c) && c->struct_size != offsetof(spo_config, port_author)) ||
+        c->abi_version != SPO_ABI_VERSION)
         return SPO_ABI;
     if (c->flags & ~(SPO_INIT_NO_RENDER | SPO_INIT_NO_SAMPLER_THREAD))
         return SPO_INVALID;
@@ -122,7 +124,7 @@ spo_result spo_init(const spo_config *c) {
     spo = calloc(1, sizeof(*spo));
     if (!spo)
         return SPO_CAPACITY;
-    spo->config = *c;
+    memcpy(&spo->config, c, c->struct_size);
     spo_text_copy(spo->renderer_name, sizeof(spo->renderer_name), "Headless");
     spo->cursor = 0;
     spo->graph_max = 33.333333;
@@ -134,7 +136,9 @@ spo_result spo_init(const spo_config *c) {
     spo->stats.struct_size = sizeof(spo_stats);
     if (!spo_text_copy(spo->path, sizeof(spo->path), c->config_path) ||
         !spo_text_copy(spo->name, sizeof(spo->name), c->port_name) ||
-        !spo_text_copy(spo->version, sizeof(spo->version), c->port_version)) {
+        !spo_text_copy(spo->version, sizeof(spo->version), c->port_version) ||
+        (c->struct_size == sizeof(*c) &&
+         !spo_text_copy(spo->author, sizeof(spo->author), c->port_author))) {
         spo_shutdown();
         return SPO_CAPACITY;
     }
@@ -527,7 +531,8 @@ spo_result spo_frame(uint32_t width, uint32_t height) {
     spo_metrics_request();
     spo_metrics_collect(now);
     {
-        int show = spo->overlay.items || spo->counter_mask || spo->indicator_mask || spo->open;
+        int show = spo->overlay.items || spo->counter_mask || spo->indicator_mask || spo->open ||
+                   spo_signature_active(now);
         int render = !(spo->config.flags & SPO_INIT_NO_RENDER), routed = 0;
         uint32_t target_w = width, target_h = height;
         if (spo->sink && spo->screen_mode == 0 && spo->sink->available())

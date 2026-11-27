@@ -48,6 +48,7 @@ config.get_proc_address = resolve;
 config.config_path = "conf/overlay.ini";
 config.port_name = "My Port";
 config.port_version = "1.0";
+config.port_author = "Your name"; /* optional: "Port by Your name" for 5 s at start and on About */
 spo_init(&config);
 
 while (SDL_PollEvent(&event)) {

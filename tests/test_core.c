@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1139,6 +1140,20 @@ static void touch_menu(void) {
     assert(!spo_menu_is_open());
     spo_shutdown();
 }
+static void signature(void) {
+    spo_config c = config(NULL);
+    spo_shutdown();
+    c.port_author = "Someone";
+    assert(spo_init(&c) == SPO_OK);
+    assert(spo_frame(640, 480) == SPO_OK && spo->mesh.count > 0);
+    spo->signature_from = spo_now() - UINT64_C(6000000000);
+    assert(spo_frame(640, 480) == SPO_OK && spo->mesh.count == 0);
+    spo_shutdown();
+    c.struct_size = offsetof(spo_config, port_author);
+    assert(spo_init(&c) == SPO_OK && !spo->author[0]);
+    assert(spo_frame(640, 480) == SPO_OK && spo->mesh.count == 0);
+    spo_shutdown();
+}
 int main(void) {
     input();
     snapshots();
@@ -1165,6 +1180,7 @@ int main(void) {
     second_screen();
     touch_menu();
     malformed_config();
+    signature();
     spo_shutdown();
     puts("core: input, anchors, presets, parsers, persistence, callbacks and timing passed");
     return 0;

@@ -563,12 +563,16 @@ static spo_result menu(uint32_t width, uint32_t height) {
         return SPO_CAPACITY;
     y += m.pady + m.bar + 10;
     if (spo->tab == spo_menu_tabs() - 1) {
-        char port[160], renderer[96];
-        const char *about[] = {port, renderer, "Overlay   Producdevity/sbc-port-overlay " SPO_VERSION " (MIT)",
+        char port[160], author[64], renderer[96];
+        const char *about[] = {port, author, renderer,
+                               "Overlay   Producdevity/sbc-port-overlay " SPO_VERSION " (MIT)",
                                "Font      Spleen (BSD-2-Clause)", NULL};
+        int row = 0, i, values = spo->author[0] ? 3 : 2;
         snprintf(port, sizeof(port), "Port      %s %s", spo->name, spo->version);
+        snprintf(author, sizeof(author), "Ported by %s", spo->author);
         snprintf(renderer, sizeof(renderer), "Renderer  %s", spo->renderer_name);
-        int row = 0, i;
+        if (!spo->author[0])
+            memmove(&about[1], &about[2], sizeof(about) - 2 * sizeof(about[0]));
         for (i = 0; about[i]; i++) {
             int lines = ((int)strlen(about[i]) + m.cols - 1) / m.cols;
             if (lines < 1)
@@ -576,7 +580,7 @@ static spo_result menu(uint32_t width, uint32_t height) {
             if ((row + lines) * m.ch > SPO_MENU_ROWS * m.rowh)
                 break;
             if (!wrapped(&m, x + m.padx, y + row * m.ch, about[i],
-                         palette[i < 2 ? SPO_TONE_VALUE : SPO_TONE_DIM], 8))
+                         palette[i < values ? SPO_TONE_VALUE : SPO_TONE_DIM], 8))
                 return SPO_CAPACITY;
             row += lines;
         }
@@ -593,7 +597,58 @@ static spo_result menu(uint32_t width, uint32_t height) {
     y += 2 * m.ch + 6;
     return menu_footer(&m, x, y) ? SPO_OK : SPO_CAPACITY;
 }
+#define SPO_SIGNATURE_NS UINT64_C(5000000000)
+#define SPO_SIGNATURE_FADE_NS UINT64_C(1000000000)
+/* "Port by <author>" for the first seconds after the first frame. */
+int spo_signature_active(uint64_t now) {
+    if (!spo->author[0])
+        return 0;
+    if (!spo->signature_from)
+        spo->signature_from = now;
+    return now - spo->signature_from < SPO_SIGNATURE_NS;
+}
+static spo_result signature(uint32_t width, uint32_t height, uint64_t now) {
+    char line[64];
+    uint64_t left = SPO_SIGNATURE_NS - (now - spo->signature_from);
+    uint32_t fade = left < SPO_SIGNATURE_FADE_NS ? (uint32_t)(left * 255 / SPO_SIGNATURE_FADE_NS) : 255;
+    int size = height >= 720 ? 3 : 2, w, h, pad;
+    spo_rect at;
+    snprintf(line, sizeof(line), "Port by %s", spo->author);
+    /* One mesh has one font: follow the stats panel's when it is drawn. */
+    if (!spo->mesh.count)
+        use_font((uint32_t)size);
+    pad = face->cw / 2 + 2;
+    w = (int)strlen(line) * face->cw + 2 * pad;
+    h = face->ch + 2 * pad;
+    if (w > (int)width - 16 || h > (int)height - 16)
+        return SPO_OK;
+    /* Bottom right, or bottom left when the stats panel sits bottom right. */
+    at = spo_anchor(width, height, w, h,
+                    spo->overlay.items && spo->overlay.anchor == SPO_BOTTOM_RIGHT ? SPO_BOTTOM_LEFT
+                                                                                  : SPO_BOTTOM_RIGHT);
+    if (!rectangle(at.x, at.y, w, h, panel_color, (uint8_t)(fade * 160 / 255)) ||
+        !text(at.x + pad, at.y + pad, line, palette[SPO_TONE_LABEL], (uint8_t)fade))
+        return SPO_CAPACITY;
+    spo->signature_drawn = 1;
+    return SPO_OK;
+}
+static spo_result stats(uint32_t width, uint32_t height);
 spo_result spo_layout(uint32_t width, uint32_t height) {
+    uint64_t now = spo_now();
+    spo_result result;
+    int signing = !spo->open && spo_signature_active(now);
+    /* The cached stats mesh must not carry the signature once it has gone. */
+    if (signing || spo->signature_drawn) {
+        spo->mesh_formatted_at = 0;
+        spo->signature_drawn = 0;
+    }
+    result = stats(width, height);
+    if (result != SPO_OK || !signing)
+        return result;
+    spo->mesh.revision++;
+    return signature(width, height, now);
+}
+static spo_result stats(uint32_t width, uint32_t height) {
     uint64_t now = spo_now();
     uint32_t i, valid = 0;
     uint32_t old_count = spo->mesh.count;

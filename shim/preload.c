@@ -56,6 +56,7 @@ static void start(SDL_Window *window) {
     config.config_path = getenv("SPO_CONFIG");
     config.port_name = name ? name : "Port";
     config.port_version = getenv("SPO_PORT_VERSION");
+    config.port_author = getenv("SPO_PORT_AUTHOR");
     if (spo_init(&config) != SPO_OK)
         return;
     if (settings)

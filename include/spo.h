@@ -108,6 +108,8 @@ typedef struct spo_config {
     spo_pause_fn on_pause;
     void *pause_user;
     uint32_t flags;
+    /* Optional. Shown for a few seconds at start and on the About tab as "Port by <author>". */
+    const char *port_author;
 } spo_config;
 typedef struct spo_page_desc {
     uint32_t struct_size;

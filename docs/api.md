@@ -254,6 +254,7 @@ with `SDL_PeepEvents` is not covered, including by [Face buttons](#face-buttons)
 | `SPO_CONFIG` | Config file path. Unset keeps settings in memory. |
 | `SPO_SETTINGS` | Settings file, below. |
 | `SPO_PORT_NAME`, `SPO_PORT_VERSION` | Shown on the About tab. |
+| `SPO_PORT_AUTHOR` | Shows "Port by <author>" for 5 seconds at start and on the About tab. |
 
 ## Settings file
 
